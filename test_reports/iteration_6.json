@@ -1,0 +1,58 @@
+{
+  "summary": "Iteration 6 — Verification of (a) NEW screenshot serving endpoint GET /api/real-user-traffic/jobs/{id}/screenshot/{filename} with dual-auth (Bearer header OR ?t=<jwt>), (b) live-step shape now exposes a 'screenshot' string field, (c) /admin/system-check overall now returns 'healthy' when only soft warnings exist (Email/JWT/Postback). All 3 are implemented as specified. Regression: 85 passed / 1 skipped / 0 failed (test_iteration2_smoke.py + test_rut_iteration4.py + test_iteration5_new_features.py). New iteration-6 suite: 27 passed / 0 failed. Combined = 112 pass / 1 skip / 0 fail.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /api/real-user-traffic/jobs/{id}/screenshot/{filename}",
+        "issue": "Path-traversal payload '..%2Fsecret.png' (the exact example in the review request) does NOT reach the handler — uvicorn/Starlette URL-decodes %2F to '/' before route matching, so a router-level 404 ('Not Found') is returned instead of the handler's 400 ('Invalid filename'). The handler's own basename + slash-check works correctly when the traversal char does reach it (verified with '..%5Csecret.png' which returns 400). End-user security posture is unaffected (the file is still inaccessible), but the response code differs from the spec for this specific payload. Consider mounting a Starlette middleware that rejects raw '..' segments or accept that '%2F' will always 404."
+      },
+      {
+        "endpoint": "GET /api/admin/system-check",
+        "issue": "Per-request cost is still high: shutil.disk_usage + 11 importlib.import_module calls + a Playwright launch probe + DB ping on every hit. Cache for ~10s with a TTL or move to a /admin/system-check?fresh=true pattern."
+      },
+      {
+        "endpoint": "Carry-over from iteration 5",
+        "issue": "RUT background runner still does not cancel on uvicorn shutdown — startup reaper mitigates user-visible symptoms but the worker can still hang."
+      },
+      {
+        "endpoint": "Carry-over from iteration 3",
+        "issue": "find_click_across_dbs() still scans every per-user DB on every postback/pixel."
+      }
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration6_screenshot.py",
+    "/app/backend/tests/test_iteration5_new_features.py",
+    "/app/backend/tests/test_rut_iteration4.py",
+    "/app/backend/tests/test_iteration2_smoke.py",
+    "/app/test_reports/pytest/iteration6_screenshot.xml",
+    "/app/test_reports/pytest/iteration6_regression.xml"
+  ],
+  "action_items": [
+    "(Cosmetic) Add a Starlette middleware or a regex check for raw '..' segments BEFORE the route-matching pass so '..%2Fsecret.png' returns 400 (matches the spec example). Current behaviour is safe (404) but does not match the literal spec.",
+    "(Carry-over) Cache or TTL /admin/system-check — every call does a Chromium probe + 11 importlib imports.",
+    "(Carry-over) Cancel in-flight RUT background tasks on uvicorn shutdown via FastAPI lifespan + request_job_cancel.",
+    "(Carry-over) Add a clickid -> user_id index in main_db so postback/pixel can stop scanning every per-user DB."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now ~9851 lines. Split into routers (auth, admin, links, clicks, conversions, proxies, sub_users, real_user_traffic, form_filler, utilities). The new screenshot endpoint adds ~65 more lines.",
+    "rut_screenshot() duplicates the JWT-decode / user-resolve flow from get_current_user() because it has to support two auth carriers (header + ?t=). Extract a small helper get_user_from_token(token: str) used by both — currently the manual decode path drifts from the canonical dependency (e.g. it does not check user.status=='active' for the non-sub-user path? — actually it does, but only inline — refactor for safety).",
+    "FileResponse(path) inside rut_screenshot() does not set a Cache-Control header — every modal scroll/poll re-fetches the same PNG over the wire. Add 'Cache-Control: private, max-age=300' since filenames are immutable per visit.",
+    "push_live_step() truncates 'detail' to 200 chars but does not truncate 'screenshot' — fine in practice because filenames are short (<= ~50 chars), but a malicious caller of the helper could push huge strings into the in-memory buffer."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration6_screenshot.py (new — 27 tests)"
+  ],
+  "success_rate": {
+    "backend": "100% — regression 85 pass / 1 skip / 0 fail + iteration-6 27 pass / 0 fail = 112 pass / 1 skip / 0 fail",
+    "frontend": "N/A (backend-only per review)"
+  },
+  "test_credentials": "Admin: admin@trackmaster.local / admin123 (from /app/memory/test_credentials.md). Two fresh test users (test_rut6a_<uuid>@example.com, test_rut6b_<uuid>@example.com) created per run with real_user_traffic=true to verify cross-user isolation; both deleted via admin DELETE at the end.",
+  "seed_data_creation": "Per-run (test_iteration6_screenshot.py): 2 pending users -> activated with full feature set; 1 link (offer_url=https://example.com/rut-it6); 1 in-memory RUT job (created via POST /jobs, then stopped + deleted) — used to assert the live-log step shape contains a 'screenshot' string key. 1 fake DB job doc inserted directly into db.real_user_traffic_jobs via pymongo (job_id='shotjob-<rand>', status='completed', user_id=userA) PLUS a 1x1 transparent PNG written to /app/backend/real_user_traffic_results/<jid>/screenshots/test.png. All seeded artefacts (DB doc, PNG, screenshots dir, job dir, link, both users) cleaned up at the end of the run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteration-6 covers the screenshot endpoint and the relaxed system-check. Key contract checks proven: (1) 401 on no token, (2) 404 on header-auth + fake job, (3) 404 on ?t=jwt + fake job (this is the proof that the query-param auth path is wired), (4) 401 on ?t=garbage (malformed token), (5) 400 on backslash-encoded traversal '..%5Csecret.png' AND on '.jpg' filename, (6) 404 on cross-user fetch (info-leak guard — userB token + userA's job + real PNG), (7) 200 image/png on owner+real job+real PNG via header AND via ?t=jwt, (8) 404 on owner+real job+missing PNG. To re-seed manually: insert {job_id, user_id, status:'completed', total, processed} into db.real_user_traffic_jobs, then mkdir -p /app/backend/real_user_traffic_results/<jid>/screenshots and drop a real .png inside. ALWAYS clean up after — both DB doc and the disk folder. The only deviation from the literal spec is that '..%2Fsecret.png' returns a router-404 instead of the handler's 400 because uvicorn URL-decodes %2F before route matching. Behaviour is still safe (file inaccessible). Mongo via MONGO_URL + DB_NAME from env.",
+  "rca_of_the_issue": "N/A — feature-addition verification, not a bug-fix. The single deviation worth noting (path-traversal '..%2F...' returning 404 instead of 400) is rooted in Starlette/uvicorn URL-decoding the %2F to '/' BEFORE route matching, so the API path becomes /jobs/<jid>/screenshot/../secret.png which has no matching route. The handler's own guard ('safe != filename', '/' in filename, '\\' in filename, must end with .png) is correct and was verified using a backslash-encoded traversal payload that does pass through to the handler."
+}

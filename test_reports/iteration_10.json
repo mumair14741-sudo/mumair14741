@@ -1,0 +1,39 @@
+{
+  "summary": "Iteration 10 review — Strict thank-you detection + Target Conversions run mode. Backend: 19/19 new iteration-10 tests passing + 77/77 regression (iter-7: 32, iter-8: 13, iter-9: 32) = 96/96 total (100%). Frontend: Real User Traffic page renders both target-mode buttons (data-testid='rut-target-clicks-mode' / 'rut-target-conversions-mode'), switching to conversions mode replaces 'Total Clicks Target' with 'Target Conversions' + 'Max Attempts' inputs (data-testid='rut-target-conversions' / 'rut-max-attempts'), Concurrency remains visible, Start button label switches from 'Send 10 Real Clicks' → 'Run until 10 Clicks (max 100 attempts)' in conversions mode, 0 console errors. POST /real-user-traffic/jobs response now includes target_mode/target_conversions/max_attempts + all regression fields (total, form_fill_enabled, state_match_enabled, imported_from_job, rows_loaded). Validation returns 400 for: invalid target_mode, missing target_conversions in conversions mode, max_attempts < target_conversions, target_conversions > 10000. GET /api/real-user-traffic/jobs/{id} exposes the new fields on persisted jobs. _is_thank_you_page helper verified for all 7 stimulus cases + extra form-negative overrule case.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "RealUserTrafficPage — Start button label in conversions mode", "issues": ["Label reads 'Run until 10 Clicks (max 100 attempts)' when form-fill is OFF because code does formFillEnabled ? 'Conversions' : 'Clicks'. In target_mode='conversions' the word 'Clicks' is semantically misleading — thank-you detection (form-fill) is what a 'conversion' means. Consider either (a) force-enabling form_fill when user picks conversions mode, or (b) always label it 'Conversions' when target_mode='conversions' regardless of form-fill toggle."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration10_rut_thankyou_and_target_mode.py",
+    "/app/test_reports/pytest/iteration10_rut.xml"
+  ],
+  "action_items": [
+    "(Minor / cosmetic) Re-consider Start-button label wording in conversions mode when form-fill is disabled — currently reads 'Run until N Clicks (max M attempts)' which conflicts with the 'target conversions' semantics. A conversion (thank-you page) can only be detected when form-fill runs, so either tie target_mode='conversions' to auto-enable form_fill_enabled, or hard-code the label to 'Conversions' when target_mode='conversions'.",
+    "(Minor) Consider surfacing target_reached in RUT_JOBS init reliably — it's initialised to False at line ~701 but not re-read in MongoDB persistence; check that job doc carries it through _package_partial_results for UI badges."
+  ],
+  "critical_code_review_comments": [
+    "_is_thank_you_page design is sound — 2-of-3 signal rule + form-page negative overrule correctly rejects captcha / form reloads while catching the stimulus thnkspg.com case. Strong positive.",
+    "Dispatcher branch on target_mode='conversions' uses a spawn-pool + attempt_counter + in_flight set; cancel_event flip on target-reach prevents new spawns but in-flight cleanly drains. Verified via code-inspection at ~line 1317.",
+    "POST /real-user-traffic/jobs validation is tight: invalid mode, out-of-range target_conversions (1..10000), max_attempts < target_conversions all return 400 with clear messages — good.",
+    "Backward-compat verified: target_mode defaults to 'clicks' and legacy fixed-count behaviour unchanged (all 77 iter-7/8/9 regression tests green).",
+    "MINOR: _THANKYOU_URL_KEYWORDS includes very generic tokens like 'offer', 'reward', 'claim' — any same-host URL containing these + any text keyword could false-positive. Current 2-of-3 rule protects most cases but monitor false positives in production."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration10_rut_thankyou_and_target_mode.py (new, 19 tests)"
+  ],
+  "success_rate": {"backend": "100% (19/19 new + 77/77 regression = 96/96)", "frontend": "100% (target-mode toggle, conditional inputs, start-button label swap, 0 console errors)"},
+  "test_credentials": "Admin: admin@trackmaster.local / admin123. Dynamic users: TEST_rut10_*@example.com + TEST_frut10_*@example.com (password Test@12345 / Passw0rd!), activated via PUT /api/admin/users/{id} with features={real_user_traffic:true, links:true}.",
+  "seed_data_creation": "Test fixture registers fresh user per session + creates 1 link (offer_url=https://example.com). No long-running playwright jobs launched (per review-request guidance). Created 2 short-lived jobs (1 clicks-mode, 1 conversions-mode) and immediately /stop'd them.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Run: `REACT_APP_BACKEND_URL=https://task-tracker-1480.preview.emergentagent.com pytest backend/tests/test_iteration10_rut_thankyou_and_target_mode.py backend/tests/test_iteration7_full_review.py backend/tests/test_iteration8_rut_pending_leads.py backend/tests/test_iteration9_rut_pending_and_state_match.py -v`. Iteration-10 adds 19 new tests. Key helpers: _is_thank_you_page (landing_url, final_url, page_text, page_title) → bool with 2-of-3 signal rule. Frontend data-testids added: rut-target-clicks-mode, rut-target-conversions-mode, rut-target-conversions, rut-max-attempts. No new MongoDB fields introduced on persisted job doc other than what was in RUT_JOBS init; UI reads them via GET /api/real-user-traffic/jobs/{id}.",
+  "rca of the issue": "No blocking bug found. Only cosmetic finding: conversions-mode start-button label inherits 'Clicks' word when form_fill is disabled — root cause is a conditional render `formFillEnabled ? 'Conversions' : 'Clicks'` at RealUserTrafficPage.js line ~1203. Mitigation (main agent optional): replace with `targetMode === 'conversions' ? 'Conversions' : (formFillEnabled ? 'Submissions' : 'Clicks')`, or disable target-conversions mode until form_fill is toggled on."
+}

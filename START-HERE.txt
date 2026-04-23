@@ -1,0 +1,91 @@
+===============================================================
+      TRACKMASTER - LOCALHOST PAR KAISE CHALAYEN
+===============================================================
+
+Sirf 2 cheezein karni hain.
+
+
+---------------------------------------------------------------
+STEP 1 : Docker Desktop install karein (ek hi baar)
+---------------------------------------------------------------
+
+Link :  https://www.docker.com/products/docker-desktop/
+
+Windows / Mac :
+  - Installer download karein aur install karein (Next Next Finish)
+  - Install ke baad Docker Desktop OPEN karein
+  - 1-2 minute ruko jab tak neeche left corner par
+    "Engine running" (green dot) na aa jaye
+
+Linux :
+  sudo apt install docker.io docker-compose-plugin
+  (Ya : curl -fsSL https://get.docker.com ^| sudo sh)
+
+
+---------------------------------------------------------------
+STEP 2 : Installer par DOUBLE-CLICK karein
+---------------------------------------------------------------
+
+Windows :
+  >>> install-windows.bat par DOUBLE-CLICK karein <<<
+
+Mac :
+  Terminal kholo, is folder mein jao, aur chalao :
+     bash install-mac-linux.sh
+
+Linux :
+  chmod +x install-mac-linux.sh
+  ./install-mac-linux.sh
+
+
+Installer ye sab automatically karega :
+  [1/5] Docker ready hai verify
+  [2/5] Settings file (.env) banayega
+  [3/5] App build + start (pehli baar 5-10 min lagenge)
+  [4/5] Services ready hone tak wait
+  [5/5] Browser khud khol dega
+
+
+---------------------------------------------------------------
+LOGIN DETAILS
+---------------------------------------------------------------
+
+URL       : http://localhost:3000
+Email     : admin@trackmaster.local
+Password  : admin123
+
+(Ye .env file mein hain. Aap change kar sakte hain.)
+
+
+---------------------------------------------------------------
+DOBARA CHALAO (computer restart ke baad)
+---------------------------------------------------------------
+
+Sirf installer file par dobara double-click karein.
+Smart hai - pehle se installed hai toh sirf start karega,
+30 second mein tayar ho jayega.
+
+
+---------------------------------------------------------------
+COMMON COMMANDS (agar terminal use karna ho)
+---------------------------------------------------------------
+
+Start app       :  docker compose up -d
+Stop app        :  docker compose down
+Live logs       :  docker compose logs -f
+Backend logs    :  docker compose logs -f backend
+Status          :  docker compose ps
+Rebuild         :  docker compose up -d --build
+
+
+---------------------------------------------------------------
+AGAR KOI PROBLEM HO
+---------------------------------------------------------------
+
+1. Docker Desktop OPEN hai aur "Engine running" green hai ye
+   confirm karein (neeche left corner)
+2. Terminal/CMD mein chalayein :  docker compose logs -f
+3. Error ka screenshot bhejein
+
+
+Full guide :  DOCKER_SETUP.md

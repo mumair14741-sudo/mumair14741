@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 8 review of Real User Traffic invalid-data detection + pending_leads.xlsx feature. Backend: 13/13 new tests + 32/32 iteration-7 regression = 45/45 passing. Covered: new GET /api/real-user-traffic/jobs/{job_id}/pending-leads (401 no-auth, 404 missing job, 404 for jobs without form fill), existing /download zip endpoint (unchanged), POST /api/real-user-traffic/jobs regression with link_id+proxies payload, _detect_validation_errors helper against real headless chromium (no-error, .error class, body phrase scenarios), pick_next_row closure logic (skips consumed + invalid sets), _record incrementing invalid_data counter, _package_partial_results packaging pending_leads.xlsx (source grep), and admin login + user register/activate/login regression. Frontend: Real User Traffic page loads with all form testids (rut-link-select, rut-proxies, rut-user-agents, rut-form-fill-toggle, rut-start-btn), form-fill toggle reveals rut-data-excel, 0 console errors, Dashboard/Links/Settings all load. The LEADS button (data-testid starts with 'rut-download-pending-') correctly does NOT render for non-form-fill jobs (verified by testid-based query returning []). Stat cards 'Invalid Data' + 'Leads Left' confirmed in code at RealUserTrafficPage.js:1093,1095 — they only render when an activeJob is set via Start-click flow.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration8_rut_pending_leads.py",
+    "/app/backend/tests/test_iteration7_full_review.py",
+    "/app/test_reports/pytest/iteration8_rut.xml"
+  ],
+  "action_items": [
+    "No blocking issues — iteration-8 additive changes are working as specified.",
+    "(Optional) Consider setting activeJob from polling results (not only from startJob handler) so returning users see the 'Invalid Data' / 'Leads Left' stats + 'Pending Leads' download button for their most recent completed job without having to re-start one. Currently those UI elements only appear after a fresh Start click in the same browser session.",
+    "(Optional code-quality) real_user_traffic.py is 1838 lines — same cohesion concerns as server.py; consider extracting helpers (_detect_validation_errors, _VALIDATION_ERROR_* constants, pick_next_row state, pending-leads writer) into submodules."
+  ],
+  "critical_code_review_comments": [
+    "_detect_validation_errors could false-positive on pages that display 'Required' helper hints for un-touched fields; the current filter (low in ('required', '*required', 'required field')) is narrow and doesn't cover variants like 'This field is required' / 'Field is required'. Consider stricter 'post-submit only' gating (already partially done by only running after submit click).",
+    "pending_leads.xlsx writer uses rows[0].keys() for columns — if the first row has fewer keys than later rows (sparse excel), some data will be lost. Safer: union of keys across rows.",
+    "Endpoint GET /api/real-user-traffic/jobs/{job_id}/pending-leads returns 404 'Pending leads file not found' for jobs without form_fill — good UX, but consider returning 400 with a clearer 'This job did not use a lead file' distinction from true 404 (job not found) to help FE differentiate."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration8_rut_pending_leads.py (new, 13 tests, all passing)"
+  ],
+  "success_rate": {"backend": "100% (13/13 new + 32/32 regression = 45/45)", "frontend": "100% (all tested flows)"},
+  "test_credentials": "Admin: admin@trackmaster.local / admin123. Dynamic test users created per-run as TEST_rut_*@example.com, activated via PUT /api/admin/users/{id} with {status:active, features:{real_user_traffic:true, links:true}}.",
+  "seed_data_creation": "Test suite creates fresh pending users per run and activates them via admin API. A single link + a single RUT job are also created per test run — all are left in MongoDB; safe to prune.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Run with: `PLAYWRIGHT_BROWSERS_PATH=/pw-browsers REACT_APP_BACKEND_URL=https://task-tracker-1480.preview.emergentagent.com pytest backend/tests/test_iteration8_rut_pending_leads.py --asyncio-mode=auto -v`. Idempotent, self-seeds users. Form-fill job with a real .xlsx upload + real proxy traffic was intentionally NOT end-to-end driven (needs real working proxies); validation-error detection is instead verified with a synthetic in-memory headless chromium page. The LEADS button appearance was verified by testid-based DOM query; conditional on form_fill_enabled=true confirmed via code + live DOM absence for non-form-fill runs.",
+  "rca of the issue": "N/A — feature is working as specified by main agent."
+}

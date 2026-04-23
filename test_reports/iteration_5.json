@@ -1,0 +1,58 @@
+{
+  "summary": "Iteration 5 — Regression + new-feature verification for the 'Stop button on Real User Traffic' bug fix and the 4 newly-added pieces (forgiving stop endpoint, startup orphan reaper, GET /admin/system-check, GET .../jobs/{id}/live-log, _device_name_from_ua helper + device_name propagation). Regression (test_iteration2_smoke.py + test_rut_iteration4.py) = 52 passed / 1 skipped / 0 failed. New-feature suite (test_iteration5_new_features.py) = 33 passed / 0 failed. Combined = 85 pass / 1 skip / 0 fail. User-reported bug ('Stop button doesn't stop, no results shown / Job not running in this worker') is FIXED — stop endpoint now returns 200 in all 3 paths (in-memory running, DB-only terminal, DB-only running/orphan) and the startup reaper auto-stops leftover running/queued jobs on every backend boot.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /api/admin/system-check",
+        "issue": "'Email service' check is reported as ok:false when neither SMTP_USER/SMTP_PASSWORD nor RESEND_API_KEY is set. In this environment none is configured, so overall status comes back 'degraded' (not 'healthy'). That is expected behaviour for this env, but in a production deploy this will always flip the overall badge red until SMTP is wired up. Consider treating 'no email service configured' as a warning rather than a hard failure, or flag it as info so that 'overall' stays 'healthy' when every other check is green."
+      },
+      {
+        "endpoint": "GET /api/admin/system-check",
+        "issue": "'JWT secret' and 'Postback token' checks still fail when the defaults are kept. That is correct security hygiene, but it also means every fresh env will show overall=degraded even though nothing is actually broken. Document the expected state for a clean bring-up."
+      },
+      {
+        "endpoint": "Carry-over from iteration 4",
+        "issue": "RUT background runner still does not cancel on uvicorn shutdown. With the new startup reaper the user-visible symptom is now mitigated (stale jobs get auto-stopped on next boot), but the worker can still hang on 'Waiting for background tasks to complete' during a live job restart."
+      },
+      {
+        "endpoint": "Carry-over from iteration 3",
+        "issue": "find_click_across_dbs() still scans every per-user DB on every postback/pixel. Index clickid -> user_id in main_db to flatten O(N_users)."
+      }
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration5_new_features.py",
+    "/app/backend/tests/test_rut_iteration4.py",
+    "/app/backend/tests/test_iteration2_smoke.py",
+    "/app/test_reports/pytest/iteration5_full.xml",
+    "/app/test_reports/pytest/iteration5_new.xml",
+    "/app/test_reports/pytest/iteration5_regression.xml"
+  ],
+  "action_items": [
+    "(Minor) Soften /api/admin/system-check so that missing Email / default JWT / default postback token flip 'overall' to 'degraded' only when at least one hard dependency (Python deps / Browser / Database / Storage) is red. Otherwise production admins will always see a degraded badge even on a perfectly healthy deploy.",
+    "(Carry-over) Cancel in-flight RUT background tasks on uvicorn shutdown — signals already exist (request_job_cancel); hook it from a FastAPI lifespan 'on_shutdown' so the worker never hangs on reload.",
+    "(Carry-over) Add a clickid -> user_id index in main_db so postback/pixel can stop scanning every per-user DB."
+  ],
+  "critical_code_review_comments": [
+    "server.py is now ~9770 lines — consider splitting into routers (auth, admin, links, clicks, conversions, proxies, sub_users, real_user_traffic, form_filler, utilities). The RUT block alone is ~400 lines. The new /admin/system-check adds another ~140 lines.",
+    "_package_partial_results() silently swallows any zipfile error and returns None. Acceptable for best-effort, but the caller should surface a warning in the DB doc so admins know the stop succeeded but the zip did not.",
+    "The startup orphan reaper runs once in the @startup handler with no bounded concurrency — if the DB has 500+ orphan jobs the loop will serially call _package_partial_results 500x and block startup. Recommend asyncio.gather with a Semaphore(10) OR mark all jobs stopped first, then package in a background task.",
+    "GET /admin/system-check performs a shutil.disk_usage and importlib.import_module on every request. Cache the heavy bits for a few seconds or run under a TTL — otherwise a scripted status page call can become expensive.",
+    "_device_name_from_ua() regex chain is 30+ lines of conditionals; move the UA→device mapping table into a small YAML/JSON data file under /app/backend so UA updates do not require a code change."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration5_new_features.py (new — 33 tests)"
+  ],
+  "success_rate": {
+    "backend": "100% — regression 52 pass / 1 skip / 0 fail + new-features 33 pass / 0 fail = 85/1skip/0fail",
+    "frontend": "N/A (backend-only per review)"
+  },
+  "test_credentials": "Admin: admin@trackmaster.local / admin123 (from /app/memory/test_credentials.md). Fresh test_rut2_<uuid>@example.com created per run with real_user_traffic=true + all features + max_* quotas, cleaned via admin DELETE at the end.",
+  "seed_data_creation": "Per-run (test_iteration5_new_features.py): 1 pending user -> activated with full feature set; 1 link (offer_url=https://example.com/rut-it5); 1 real RUT job for in-memory stop + live-log contract (proxies=1, UAs=1, total=5, form_fill=true, xlsx in-memory); 3 fake job docs inserted directly into db.real_user_traffic_jobs via pymongo — 1 terminal-status (status=completed), 1 orphan running for the stop endpoint, 1 orphan running for the startup reaper. All docs deleted at the end; user deleted via admin API.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Iteration 5 covers: (1) 3 stop-endpoint paths — in-memory running, DB-only terminal (returns 200 {stopped:false, status}), DB-only running/orphan (returns 200 {stopped:true, status:'stopped'} AND writes stop_reason + finished_at to DB). (2) Startup orphan reaper — insert fake status='running' doc via pymongo, `sudo supervisorctl restart backend`, wait for /api to respond, read doc back: status=='stopped' and stop_reason contains 'restart' or 'startup'. (3) GET /api/real-user-traffic/jobs/{id}/live-log — 404 on unknown, shape {steps, cursor, running, status, processed, total} on owned, steps=[] when since=cursor. (4) GET /api/admin/system-check — admin-only (regular users get 401/403), returns {overall, total, passed, failed, checks[], checked_at} with required groups Python deps (incl. all 11 listed deps), Browser (Playwright Chromium ok), Database (MongoDB + users + per-user), Email, System, Storage (RUT + Form-Filler folders writable), Config. (5) _device_name_from_ua() helper — parses SM-G998B/Pixel 8 Pro/iPhone/iPad/Windows UAs to readable device names. Tokens are re-fetched after the `supervisorctl restart backend` step because in-memory tokens survive but a fresh login is safer. Mongo access uses MONGO_URL + DB_NAME from env (currently mongodb://localhost:27017 / test_database).",
+  "rca_of_the_issue": "User clicked Stop on a Real User Traffic job and got the error 'Job not running in this worker' plus no results/zip to download. RCA: (a) After any uvicorn --reload (caused by a backend code edit, a supervisor restart, or an OOM-kill), the _RUT_JOBS in-memory dict is wiped. The old handler only looked in _RUT_JOBS and raised HTTP 404 with that exact message if the job was not there — even though the DB still had status='running'. (b) Even when the job was terminal (completed/failed) but dropped out of memory, the same 404 path was hit. (c) No partial ZIP was ever built for a dead-worker job, so the UI had nothing to download. Fix verified: (1) stop handler now first tries the in-memory path (Case 1), then falls back to DB — returns 200 {stopped:false, status:<terminal>} if the DB says completed/failed/stopped (Case 2a), and for DB-status='running' it flips the doc to 'stopped', writes stop_reason, tries _package_partial_results() to zip /app/backend/real_user_traffic_results/<jid>/screenshots+report+leads_with_status, and returns 200 {stopped:true, status:'stopped'} (Case 2b). (2) A startup hook in server.py:9712-9735 now reaps every status in ('running','queued') on every boot, so a crashed-worker job can never remain 'running' forever. Both paths are covered by test_iteration5_new_features.py (TestStopDbOnlyTerminal + TestStopDbOnlyRunning + TestStartupReaper). Mitigation for future deploys: keep the startup reaper, add a FastAPI on_shutdown that calls request_job_cancel(job_id) for every key in _RUT_JOBS so graceful restarts package partial results proactively (rather than relying on stop endpoint + reaper)."
+}

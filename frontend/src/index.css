@@ -1,0 +1,113 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 217 33% 4%;
+    --foreground: 0 0% 98%;
+    --card: 217 33% 4%;
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 217 33% 4%;
+    --secondary: 240 4% 16%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 4% 16%;
+    --muted-foreground: 240 5% 65%;
+    --accent: 240 4% 16%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 4% 16%;
+    --input: 240 6% 25%;
+    --ring: 217 33% 4%;
+    --radius: 0.5rem;
+    --chart-1: 217 91% 60%;
+    --chart-2: 142 71% 45%;
+    --chart-3: 38 92% 50%;
+    --chart-4: 0 84% 60%;
+    --chart-5: 271 91% 65%;
+    
+    /* Brand color CSS variables (applied by BrandingContext) */
+    --brand-primary: #3B82F6;
+    --brand-secondary: #22C55E;
+    --brand-accent: #8B5CF6;
+    --brand-danger: #EF4444;
+    --brand-warning: #F59E0B;
+    --brand-success: #22C55E;
+    --brand-background: #09090B;
+    --brand-card: #18181B;
+    --brand-border: #27272A;
+    --brand-text: #FAFAFA;
+    --brand-muted: #A1A1AA;
+    --brand-font: "Inter";
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: var(--brand-font), system-ui, sans-serif;
+  }
+}
+
+/* Brand utility classes */
+@layer utilities {
+  .bg-brand-primary { background-color: var(--brand-primary); }
+  .bg-brand-secondary { background-color: var(--brand-secondary); }
+  .bg-brand-accent { background-color: var(--brand-accent); }
+  .bg-brand-danger { background-color: var(--brand-danger); }
+  .bg-brand-warning { background-color: var(--brand-warning); }
+  .bg-brand-success { background-color: var(--brand-success); }
+  .bg-brand-background { background-color: var(--brand-background); }
+  .bg-brand-card { background-color: var(--brand-card); }
+  
+  .text-brand-primary { color: var(--brand-primary); }
+  .text-brand-secondary { color: var(--brand-secondary); }
+  .text-brand-accent { color: var(--brand-accent); }
+  .text-brand-danger { color: var(--brand-danger); }
+  .text-brand-warning { color: var(--brand-warning); }
+  .text-brand-success { color: var(--brand-success); }
+  .text-brand-text { color: var(--brand-text); }
+  .text-brand-muted { color: var(--brand-muted); }
+  
+  .border-brand-primary { border-color: var(--brand-primary); }
+  .border-brand-secondary { border-color: var(--brand-secondary); }
+  .border-brand-accent { border-color: var(--brand-accent); }
+  .border-brand-border { border-color: var(--brand-border); }
+  
+  /* Button styles based on data attribute */
+  [data-button-style="rounded"] .btn-brand,
+  [data-button-style="rounded"] button[class*="brand"] {
+    border-radius: 0.5rem;
+  }
+  
+  [data-button-style="pill"] .btn-brand,
+  [data-button-style="pill"] button[class*="brand"] {
+    border-radius: 9999px;
+  }
+  
+  [data-button-style="square"] .btn-brand,
+  [data-button-style="square"] button[class*="brand"] {
+    border-radius: 0;
+  }
+  
+  /* Sidebar styles */
+  [data-sidebar-style="dark"] .sidebar-brand {
+    background-color: var(--brand-background);
+    border-color: var(--brand-border);
+  }
+  
+  [data-sidebar-style="primary"] .sidebar-brand {
+    background-color: var(--brand-primary);
+  }
+  
+  [data-sidebar-style="gradient"] .sidebar-brand {
+    background: linear-gradient(180deg, var(--brand-primary), var(--brand-accent));
+  }
+}

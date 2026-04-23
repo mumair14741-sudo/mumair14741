@@ -1,0 +1,16 @@
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info
+.pytest_cache
+.ruff_cache
+.venv
+venv
+.env
+.env.local
+real_user_traffic_results/
+form_filler_results/
+tests/
+=2.0.0

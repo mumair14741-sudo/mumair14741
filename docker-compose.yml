@@ -1,0 +1,103 @@
+# ─────────────────────────────────────────────────────────────
+#  TrackMaster — docker-compose for local development / self-host
+#
+#  Services:
+#    • mongo      → MongoDB 7, data persisted in a named volume
+#    • backend    → FastAPI + Playwright (port 8001 internal)
+#    • frontend   → React build served via nginx (exposed on host :3000)
+#
+#  Quick start:
+#    1. cp .env.docker.example .env.docker   # or just keep defaults
+#    2. docker compose up --build
+#    3. Open http://localhost:3000
+#
+#  Admin login: ADMIN_EMAIL / ADMIN_PASSWORD from .env.docker
+# ─────────────────────────────────────────────────────────────
+
+services:
+
+  # ─── MongoDB ──────────────────────────────────────────────
+  mongo:
+    image: mongo:7
+    container_name: trackmaster-mongo
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    # Uncomment if you want to reach Mongo directly from the host:
+    # ports:
+    #   - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [trackmaster-net]
+
+  # ─── Backend (FastAPI + Playwright) ───────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: trackmaster-backend
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      MONGO_URL: "mongodb://mongo:27017"
+      DB_NAME: "${DB_NAME:-trackmaster}"
+      CORS_ORIGINS: "${CORS_ORIGINS:-*}"
+      JWT_SECRET_KEY: "${JWT_SECRET_KEY:-change-me-in-production}"
+      POSTBACK_TOKEN: "${POSTBACK_TOKEN:-change-me-postback-token}"
+      ADMIN_EMAIL: "${ADMIN_EMAIL:-admin@trackmaster.local}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD:-admin123}"
+      APP_URL: "${APP_URL:-http://localhost:3000}"
+      # Optional — leave empty to disable email / use alternate providers
+      SMTP_HOST: "${SMTP_HOST:-smtp.gmail.com}"
+      SMTP_PORT: "${SMTP_PORT:-587}"
+      SMTP_USER: "${SMTP_USER:-}"
+      SMTP_PASSWORD: "${SMTP_PASSWORD:-}"
+      RESEND_API_KEY: "${RESEND_API_KEY:-}"
+      SENDER_EMAIL: "${SENDER_EMAIL:-onboarding@resend.dev}"
+    volumes:
+      # Persist real-user-traffic and form-filler result zips / screenshots
+      - rut_results:/app/real_user_traffic_results
+      - ff_results:/app/form_filler_results
+    # Uncomment if you want to hit backend directly (curl http://localhost:8001)
+    # ports:
+    #   - "8001:8001"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8001/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks: [trackmaster-net]
+
+  # ─── Frontend (React build + nginx) ───────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Leave empty → frontend hits same origin (nginx proxies /api → backend).
+        # This is the easiest setup and works for any host.
+        REACT_APP_BACKEND_URL: ""
+    container_name: trackmaster-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    networks: [trackmaster-net]
+
+# ─── Volumes ────────────────────────────────────────────────
+volumes:
+  mongo_data:
+  rut_results:
+  ff_results:
+
+# ─── Networks ───────────────────────────────────────────────
+networks:
+  trackmaster-net:
+    driver: bridge

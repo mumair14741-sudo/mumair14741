@@ -1,0 +1,39 @@
+{
+  "summary": "Iteration 9 review of Real User Traffic auto-import pending leads + state-matched lead assignment. Backend: 31/32 new tests passing + 45/45 iteration-7 + iteration-8 regression passing (76/77 total). Frontend: Real User Traffic page renders 3 data-source buttons (Excel / Google Sheet / Pending from previous run) when form-fill toggle is ON, the pending button is correctly DISABLED with opacity-40 when there are no past jobs with pending leads, the 'Match lead state to proxy IP state' CheckRow (rut-state-match) renders, GET /api/real-user-traffic/jobs/pending-candidates is fetched on page mount (verified via network interception — 2 hits), 0 console errors, Dashboard/Links/Settings regression passes. BUGS FOUND & FIXED by me: (1) FastAPI route ordering bug — `/real-user-traffic/jobs/pending-candidates` was declared AFTER `/jobs/{job_id}`, so every GET to pending-candidates returned 404 'Job not found' (captured by {job_id} route). Moved pending-candidates to declare BEFORE the {job_id} route in server.py and restarted backend — now returns proper 200/401. BUG REPORTED (not fixed): (2) `_normalize_state('NJ (New Jersey)')` returns '' instead of 'NJ' — the helper first lowercases the input then splits on '(' but the post-split 'nj' lookup uses `_US_NAME_TO_CODE` which is keyed by full-name → miss; the fallback alphanum-strip is 'NJNewJersey' length≠2 → miss. This is a spec-listed test case that the main agent must fix.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "real_user_traffic._normalize_state", "issue": "'NJ (New Jersey)' returns '' (expected 'NJ'). After stripping '(' part, remaining 'nj' is checked against _US_NAME_TO_CODE (full-name keyed) so it misses. Needs a second check against _US_CODES on the stripped/upper token. This is an EXPLICIT test case listed in the iteration-9 spec."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration9_rut_pending_and_state_match.py",
+    "/app/test_reports/pytest/iteration9_rut.xml"
+  ],
+  "action_items": [
+    "Fix `_normalize_state` in /app/backend/real_user_traffic.py (~line 502) — after first=low.split(',')[0].split('(')[0].strip(), also check `first.upper() in _US_CODES` before bailing out. One-line patch: `if first.upper() in _US_CODES: return first.upper()`. This resolves the 'NJ (New Jersey)' → 'NJ' test case.",
+    "(Already fixed by testing agent) Route-ordering bug for GET /api/real-user-traffic/jobs/pending-candidates — moved its declaration BEFORE /jobs/{job_id} in server.py so FastAPI matches correctly. Verified with curl returning 401 for unauth + 200 for authed fresh user."
+  ],
+  "critical_code_review_comments": [
+    "BUG (fixed): FastAPI is order-sensitive. Any new /jobs/<literal-path> endpoint must be declared BEFORE /jobs/{job_id}. Adding a lint-check or integration test that specifically hits pending-candidates unauthed (not just {job_id}) catches this class of regressions.",
+    "BUG: _normalize_state paren-suffix path fails for 'NJ (New Jersey)'. Same class of issue could hit 'CA - California' or 'CA/California'. Prefer extracting ANY 2-letter uppercase token from txt and checking against _US_CODES, THEN falling back to full-name match.",
+    "pick_next_row_for_state is a closure inside run_real_user_traffic_job — hard to unit-test. Consider lifting it to a module-level fn with explicit (state_code, state_index, state_rr, consumed, invalid, rows) args, as the spec itself suggests. Current tests verify it only via code-inspection + behaviour of the wrapping helper.",
+    "pending_leads_count field is used by pending-candidates query, but it's only set when _package_partial_results runs (on completed/stopped). If a job dies mid-flight and marks status=failed, its leftover leads won't appear as candidates. Might be intentional but worth calling out."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration9_rut_pending_and_state_match.py (new, 32 tests)",
+    "/app/backend/server.py (moved GET /real-user-traffic/jobs/pending-candidates before /jobs/{job_id} to fix route-ordering bug)"
+  ],
+  "success_rate": {"backend": "96.9% (31/32 new) + 100% (45/45 regression) = 98.7% overall", "frontend": "100% (all tested flows: page load, 3-btn grid, disabled state, state-match checkrow, network fetch, excel/gsheet toggles, dashboard/links/settings)"},
+  "test_credentials": "Admin: admin@trackmaster.local / admin123. Dynamic users as TEST_rut9_*@example.com + TEST_frut9_*@example.com, activated via PUT /api/admin/users/{id} with real_user_traffic + links features.",
+  "seed_data_creation": "Test suite seeds source jobs with job_id='TEST_src_*' into real_user_traffic_jobs collection + writes pending_leads.xlsx into /app/backend/real_user_traffic_results/TEST_src_*/ — fixture teardown deletes Mongo docs but leaves the /app/backend/real_user_traffic_results/TEST_src_* directories on disk (safe to prune).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Run: `REACT_APP_BACKEND_URL=https://task-tracker-1480.preview.emergentagent.com pytest backend/tests/test_iteration9_rut_pending_and_state_match.py -v --tb=short`. Also re-run iteration-7 + iteration-8 for regression. The only remaining failure is TestNormalizeState::test_code_with_paren_name — expected until main agent fixes _normalize_state. Route-ordering fix for pending-candidates is already live (backend restarted via supervisor). State-match end-to-end with real proxies was NOT exercised (would require real working proxies); verified via helper unit tests + form-field plumbing tests.",
+  "rca of the issue": "(1) Route 404: FastAPI routes match in DECLARATION order; {job_id} catch-all was declared earlier in file so literal path /pending-candidates never matched. Reproduction: curl -H 'Authorization: Bearer <user>' /api/real-user-traffic/jobs/pending-candidates → 404 'Job not found'. Mitigation applied: relocated @api_router.get('/real-user-traffic/jobs/pending-candidates') to BEFORE /jobs/{job_id}. (2) _normalize_state('NJ (New Jersey)'): txt.lower() = 'nj (new jersey)'; first = 'nj'; _US_NAME_TO_CODE only has full names so miss; fallback strips to 'NJNewJersey' length=11 ≠ 2 so miss → returns ''. Mitigation (for main agent): after computing `first`, also check `first.upper() in _US_CODES`."
+}
