@@ -309,8 +309,46 @@ async def _probe_proxy_geo(proxy: Dict[str, Any], ua: str) -> Dict[str, Any]:
     if proxy.get("username"):
         prefix, rest = server.split("://", 1)
         server = f"{prefix}://{proxy['username']}:{proxy.get('password','')}@{rest}"
-    try:
-        async with httpx.AsyncClient(proxy=server, timeout=12, headers={"User-Agent": ua}, verify=False) as cli:
+
+    # Some commercial residential proxies (proxy-jet, brightdata, etc.) ONLY accept
+    # HTTPS CONNECT tunnels and reject plain `GET http://…` forward-proxy requests,
+    # so we try an HTTPS geolocation endpoint first. If that fails we fall back to
+    # the original HTTP ip-api.com endpoint (which works on proxies that do allow
+    # plain HTTP forwarding).
+    async def _try_https_ipwhois(cli: httpx.AsyncClient) -> bool:
+        try:
+            r = await cli.get("https://ipwho.is/")
+            if r.status_code == 200:
+                data = r.json()
+                if data.get("success") is True:
+                    result["exit_ip"] = data.get("ip")
+                    result["country_name"] = data.get("country") or result["country_name"]
+                    result["country"] = data.get("country_code") or result["country"]
+                    result["region_name"] = data.get("region") or result["region_name"]
+                    result["region"] = data.get("region_code") or result["region"]
+                    result["city"] = data.get("city") or result["city"]
+                    try:
+                        result["lat"] = float(data.get("latitude") or result["lat"])
+                        result["lon"] = float(data.get("longitude") or result["lon"])
+                    except (TypeError, ValueError):
+                        pass
+                    tz = data.get("timezone") or {}
+                    if isinstance(tz, dict):
+                        result["timezone"] = tz.get("id") or result["timezone"]
+                    elif isinstance(tz, str):
+                        result["timezone"] = tz or result["timezone"]
+                    conn = data.get("connection") or {}
+                    result["is_vpn"] = bool(
+                        conn.get("type") in ("hosting", "datacenter")
+                        or (str(conn.get("org") or "").lower().find("hosting") >= 0)
+                    )
+                    return True
+        except Exception as e:
+            logger.debug(f"ipwho.is probe failed: {e}")
+        return False
+
+    async def _try_http_ipapi(cli: httpx.AsyncClient) -> bool:
+        try:
             r = await cli.get(
                 "http://ip-api.com/json/?fields=status,country,countryCode,region,regionName,city,"
                 "timezone,lat,lon,query,proxy,hosting"
@@ -328,27 +366,40 @@ async def _probe_proxy_geo(proxy: Dict[str, Any], ua: str) -> Dict[str, Any]:
                     result["lon"] = float(data.get("lon") or result["lon"])
                     result["timezone"] = data.get("timezone") or result["timezone"]
                     result["is_vpn"] = bool(data.get("proxy") or data.get("hosting"))
-                    cc = (result["country"] or "").lower()
-                    lang_map = {
-                        "us": "en-US,en;q=0.9", "gb": "en-GB,en;q=0.9", "ca": "en-CA,en;q=0.9",
-                        "au": "en-AU,en;q=0.9", "nz": "en-NZ,en;q=0.9",
-                        "de": "de-DE,de;q=0.9,en;q=0.7", "fr": "fr-FR,fr;q=0.9,en;q=0.7",
-                        "es": "es-ES,es;q=0.9,en;q=0.7", "it": "it-IT,it;q=0.9,en;q=0.7",
-                        "nl": "nl-NL,nl;q=0.9,en;q=0.7", "pt": "pt-PT,pt;q=0.9,en;q=0.7",
-                        "br": "pt-BR,pt;q=0.9,en;q=0.7", "mx": "es-MX,es;q=0.9,en;q=0.7",
-                        "jp": "ja-JP,ja;q=0.9,en;q=0.7", "kr": "ko-KR,ko;q=0.9,en;q=0.7",
-                        "in": "en-IN,en;q=0.9,hi;q=0.8", "pk": "en-PK,en;q=0.9,ur;q=0.8",
-                        "ae": "ar-AE,ar;q=0.9,en;q=0.8", "sa": "ar-SA,ar;q=0.9,en;q=0.8",
-                    }
-                    locale_map = {
-                        "us": "en-US", "gb": "en-GB", "ca": "en-CA", "au": "en-AU", "nz": "en-NZ",
-                        "de": "de-DE", "fr": "fr-FR", "es": "es-ES", "it": "it-IT", "nl": "nl-NL",
-                        "pt": "pt-PT", "br": "pt-BR", "mx": "es-MX", "jp": "ja-JP", "kr": "ko-KR",
-                        "in": "en-IN", "pk": "en-PK", "ae": "ar-AE", "sa": "ar-SA",
-                    }
-                    result["accept_language"] = lang_map.get(cc, "en-US,en;q=0.9")
-                    result["locale"] = locale_map.get(cc, "en-US")
-                    result["ok"] = True
+                    return True
+        except Exception as e:
+            logger.debug(f"ip-api.com probe failed: {e}")
+        return False
+
+    try:
+        # Longer timeout because residential proxies can take 10-15s to route
+        timeout_cfg = httpx.Timeout(30.0, connect=20.0)
+        async with httpx.AsyncClient(proxy=server, timeout=timeout_cfg, headers={"User-Agent": ua}, verify=False, http2=False) as cli:
+            ok = await _try_https_ipwhois(cli)
+            if not ok:
+                ok = await _try_http_ipapi(cli)
+            if ok:
+                cc = (result["country"] or "").lower()
+                lang_map = {
+                    "us": "en-US,en;q=0.9", "gb": "en-GB,en;q=0.9", "ca": "en-CA,en;q=0.9",
+                    "au": "en-AU,en;q=0.9", "nz": "en-NZ,en;q=0.9",
+                    "de": "de-DE,de;q=0.9,en;q=0.7", "fr": "fr-FR,fr;q=0.9,en;q=0.7",
+                    "es": "es-ES,es;q=0.9,en;q=0.7", "it": "it-IT,it;q=0.9,en;q=0.7",
+                    "nl": "nl-NL,nl;q=0.9,en;q=0.7", "pt": "pt-PT,pt;q=0.9,en;q=0.7",
+                    "br": "pt-BR,pt;q=0.9,en;q=0.7", "mx": "es-MX,es;q=0.9,en;q=0.7",
+                    "jp": "ja-JP,ja;q=0.9,en;q=0.7", "kr": "ko-KR,ko;q=0.9,en;q=0.7",
+                    "in": "en-IN,en;q=0.9,hi;q=0.8", "pk": "en-PK,en;q=0.9,ur;q=0.8",
+                    "ae": "ar-AE,ar;q=0.9,en;q=0.8", "sa": "ar-SA,ar;q=0.9,en;q=0.8",
+                }
+                locale_map = {
+                    "us": "en-US", "gb": "en-GB", "ca": "en-CA", "au": "en-AU", "nz": "en-NZ",
+                    "de": "de-DE", "fr": "fr-FR", "es": "es-ES", "it": "it-IT", "nl": "nl-NL",
+                    "pt": "pt-PT", "br": "pt-BR", "mx": "es-MX", "jp": "ja-JP", "kr": "ko-KR",
+                    "in": "en-IN", "pk": "en-PK", "ae": "ar-AE", "sa": "ar-SA",
+                }
+                result["accept_language"] = lang_map.get(cc, "en-US,en;q=0.9")
+                result["locale"] = locale_map.get(cc, "en-US")
+                result["ok"] = True
     except Exception as e:
         logger.debug(f"Proxy geo probe failed: {e}")
     return result
@@ -1622,12 +1673,57 @@ async def _execute_automation_steps(
                 if action == "goto":
                     await page.goto(value or selector, timeout=timeout, wait_until="domcontentloaded")
                 elif action == "click":
-                    await page.click(selector, timeout=timeout)
                     if wait_nav:
+                        # Expect navigation to fire as a result of the click.
+                        # Many modern lead-gen pages attach JS handlers to the
+                        # submit button that fire analytics/tracking but DO NOT
+                        # actually submit the form — so a bare `page.click` +
+                        # wait_for_load_state("networkidle") misses the fact
+                        # that the form never POSTed. We use expect_navigation
+                        # to detect this explicitly, and fall back to calling
+                        # form.submit() on the button's parent form if nothing
+                        # navigated within the timeout.
+                        nav_timeout = min(timeout, 30000)
+                        navigated = False
                         try:
-                            await page.wait_for_load_state("networkidle", timeout=20000)
+                            async with page.expect_navigation(timeout=nav_timeout, wait_until="load"):
+                                await page.click(selector, timeout=timeout)
+                            navigated = True
+                        except Exception:
+                            navigated = False
+                        if not navigated:
+                            # Click might have succeeded but no navigation fired.
+                            # Give any pending JS (LeadId / TrustedForm token
+                            # collectors that attach onsubmit handlers and only
+                            # populate hidden fields on the first click) a brief
+                            # window to finish, then call plain form.submit()
+                            # which BYPASSES onsubmit handlers and forces the
+                            # POST through.
+                            try:
+                                await page.wait_for_timeout(2500)
+                            except Exception:
+                                pass
+                            try:
+                                async with page.expect_navigation(timeout=nav_timeout, wait_until="load"):
+                                    await page.evaluate(
+                                        "(sel) => {"
+                                        "  var el = document.querySelector(sel);"
+                                        "  var f = el && (el.form || el.closest('form'));"
+                                        "  if (f) { try { f.submit(); } catch(e) {} }"
+                                        "}",
+                                        selector,
+                                    )
+                                navigated = True
+                            except Exception:
+                                pass
+                        # Best-effort wait for the post-navigation page to
+                        # settle (non-fatal if already idle).
+                        try:
+                            await page.wait_for_load_state("networkidle", timeout=15000)
                         except Exception:
                             pass
+                    else:
+                        await page.click(selector, timeout=timeout)
                 elif action == "fill":
                     await page.fill(selector, str(value), timeout=timeout)
                 elif action == "type":
