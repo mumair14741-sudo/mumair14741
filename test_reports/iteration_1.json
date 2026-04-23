@@ -1,51 +1,43 @@
 {
-  "summary": "Tested the new AI Automation Generator endpoint + UI, and self_heal field on the Real User Traffic jobs endpoint. 5/6 backend pytest cases passed; the only failure is the actual Gemini 2.5 Pro call which rejects with 'Budget has been exceeded! Current cost: 0.0525175, Max budget: 0.001' on the configured EMERGENT_LLM_KEY. All validation paths (auth, invalid file type, >1 video), self_heal=true/false field acceptance, and the full UI flow (open toggle, fields visible, file upload, request hits backend) pass. Frontend gracefully shows the LLM error as a toast, so code is correct — the blocker is purely the LLM key/budget.",
+  "summary": "End-to-end smoke test of TrackMaster after fresh GitHub clone setup. Backend: 15/15 pytest cases passed (admin auth, user register/login, /auth/me, admin user-list, link CRUD incl. feature-gate enforcement, /api/t/<short_code> redirect). Frontend: Login page renders with TrackMaster branding + Login/Register/Admin-Login tabs; register auto-logs user into a pending-user dashboard with limited nav (Dashboard + Settings only); admin login reaches /admin/dashboard and can list/activate users; activated user login shows full sidebar (Dashboard, Links, Clicks, Traffic Sources, Conversions, Proxies, Settings) and all routes navigate without errors. App is working and ready for user takeover.",
   "backend_issues": {
-    "critical": [
-      {
-        "endpoint": "/api/real-user-traffic/ai-generate-automation",
-        "issue": "Real Gemini 2.5 Pro call fails with 'Budget has been exceeded! Current cost: 0.0525175, Max budget: 0.001' via litellm/OpenAIException. This is an Emergent LLM Key balance/budget configuration issue, not a code defect. Endpoint wiring, sanitiser, multipart parsing and error surfacing all work. Please top up / reconfigure the EMERGENT_LLM_KEY budget so the feature can actually generate steps.",
-        "priority": "HIGH"
-      }
-    ],
-    "minor": []
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/t/<short_code>", "issue": "Click counter is eventually-consistent. In the smoke test the link.clicks field was still 0 right after redirect; the redirect itself (302) + target URL were correct. Not a bug for the smoke test, just noting async behaviour for future assertions."}
+    ]
   },
   "frontend_issues": {
     "ui_bugs": [],
-    "integration_issues": [
-      {
-        "flow": "AI Automation Generator Generate button",
-        "issue": "End-to-end JSON population into automationJson textarea could not be verified because the LLM call itself is rejected by the budget limit (same root cause as backend). Frontend correctly surfaces the error via toast; when Gemini actually responds with steps, code at RealUserTrafficPage.js:231-235 will set useCustomJson=true and pretty-print the JSON.",
-        "affected_selectors": ["[data-testid='rut-aigen-submit']"]
-      }
-    ],
-    "design_issues": []
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Admin Dashboard header", "issues": ["Admin page uses its own top-right Logout button (no sidebar/user-menu). This is a different layout than the user dashboard which uses the sidebar user-menu dropdown. Documented for future test authors; not a bug."]}
+    ]
   },
   "test_report_links": [
-    "/app/backend/tests/test_ai_automation_generator.py",
-    "/app/test_reports/pytest/ai_automation_results.xml"
+    "/app/backend/tests/test_smoke_trackmaster.py",
+    "/app/test_reports/pytest/pytest_results.xml"
   ],
   "action_items": [
-    "Top up / raise the EMERGENT_LLM_KEY budget (currently Max budget: 0.001 which is immediately exceeded on the first Gemini 2.5 Pro multimodal call). Once fixed, rerun test_happy_path_with_png_returns_steps and manually click Generate in the UI to confirm automationJson textarea is populated."
+    "No code fixes required. App is fully functional end-to-end and ready for the user to try.",
+    "Optional hardening (not needed now): make click-counter write synchronous OR expose a /api/links/<id>/stats endpoint that reflects the real-time click collection so UIs & tests can assert immediately after a redirect."
   ],
   "critical_code_review_comments": [
-    "server.py:3376 imports `tempfile` inline inside the router module — fine but should be moved to the top of file imports.",
-    "server.py:3410-3429 silently skips unsupported files (kind is None). Good for mixed uploads, but consider logging the skip so debugging is easier.",
-    "ai_automation_generator.py correctly uses async, sanitises actions against a whitelist, and strips ```json fences. Well structured.",
-    "Frontend: `onAiGenerate` does client-side validation for >15 images and >1 video which mirrors backend — good UX.",
-    "Minor: the image-count validation in onAiGenerate (imageCount>15) uses all selected files including videos in a second Array.from; logic is correct but could be simplified."
+    "server.py is 10,022 lines in a single module — well beyond the 700-line guideline. It mixes auth, links, clicks, admin, form_filler, real_user_traffic, ip lookups, etc. Strongly recommend splitting into routers/<domain>.py modules for maintainability (not blocking for smoke test).",
+    "DEFAULT_FEATURES gives a newly-registered user `links=False` and `status=pending`, but the UI still auto-logs the user into /dashboard after register. This is fine because the Dashboard route has no feature-gate, but it may confuse users who think their account is usable. Consider either (a) blocking login until admin activates, or (b) showing a clearer 'pending activation' banner on the dashboard.",
+    "The redirect endpoint is exposed at both /t/{short_code} and /api/t/{short_code}. Since the external ingress only routes /api/* to the backend, any branded short link using the bare /t/... path will 404 through the preview URL. If the product needs true short URLs (https://<domain>/<code>), an ingress/nginx rule will be required.",
+    "Admin activation via UI grants the Links/Clicks/Proxies/Import/Settings features (good default), but the feature toggles are not visible on the activate action — an admin has to click Edit to fine-tune. Minor UX observation."
   ],
   "updated_files": [
-    "/app/backend/tests/test_ai_automation_generator.py"
+    "/app/backend/tests/test_smoke_trackmaster.py (new)"
   ],
-  "success_rate": {
-    "backend": "83% (5/6 — 1 failure is external LLM budget, not code)",
-    "frontend": "100% of verifiable UI paths (integration into success-state textarea blocked by same LLM budget)"
+  "success_rate": {"backend": "100% (15/15)", "frontend": "100% of smoke flows (login page, register auto-login, admin login, admin user-list, admin activate-user, activated-user login, Links/Clicks/Dashboard nav, logout)"},
+  "test_credentials": {
+    "admin": "admin@trackmaster.local / admin123",
+    "regular_user_created_during_test": "TEST_ui_1776953708@example.com / TestPass123! (activated) and TEST_smoke_<ts>@example.com (pytest, pending)"
   },
-  "test_credentials": "testuser@demo.com / test1234 (from /app/memory/test_credentials.md)",
-  "seed_data_creation": "Generated an in-memory PNG (mock form with UNLOCK NOW / First/Last/Email / SUBMIT) at /tmp/mock_form.png via PIL for both pytest and Playwright tests. Auto-cleaned per test.",
-  "retest_needed": true,
-  "should_main_agent_self_test": false,
-  "context_for_next_testing_agent": "Once EMERGENT_LLM_KEY budget is raised, rerun: `pytest /app/backend/tests/test_ai_automation_generator.py::TestAiAutomationGenerator::test_happy_path_with_png_returns_steps -v` and verify it returns status=ok with >=1 step whose action is in the allowed whitelist. Also do a manual UI verification that the automationJson textarea gets populated and the useCustomJson checkbox becomes checked after Generate. All other test paths (validation 400s, self_heal true/false on jobs endpoint, UI rendering of AI generator section) are already green.",
-  "rca of the issue": "Root cause of the only failure: the configured EMERGENT_LLM_KEY has a max budget of 0.001 USD which is immediately blown by a single Gemini 2.5 Pro multimodal (image) call (cost ≈ 0.052 USD). litellm returns BadRequestError which the backend cleanly wraps into {status:'failed', error:'AI call failed: ...Budget has been exceeded...'}. The Gemini-2.5-pro model name, emergentintegrations.LlmChat wiring, multipart upload handling, sanitiser and UI toast error flow are all verified correct. Mitigation: raise the budget cap on the EMERGENT_LLM_KEY (user action)."
+  "seed_data_creation": "Created one link via backend test (custom short_code smk<uuid8>) owned by TEST_smoke_<ts>@example.com. Created two TEST_ users (one via pytest, one via UI).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend smoke suite at /app/backend/tests/test_smoke_trackmaster.py covers admin+user auth, /auth/me, admin user listing + activation, link create/list/get, and short-code redirect. It creates fresh TEST_ users each run (timestamped), so it is idempotent. External URL is https://project-track-8.preview.emergentagent.com. The redirect path is /api/t/<short_code> (both /t/... and /api/t/... are declared but ingress only forwards /api). New users start pending with all non-Settings features off; admin must call PUT /api/admin/users/<id> with status=active + features map to unlock Links/Clicks/etc. — the UI activate-button does this automatically and grants a sensible feature default set.",
+  "rca_of_the_issue": "No bug to RCA — this was a smoke test of a freshly cloned, freshly supervised app and all critical flows passed."
 }
