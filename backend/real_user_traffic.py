@@ -372,34 +372,48 @@ async def _probe_proxy_geo(proxy: Dict[str, Any], ua: str) -> Dict[str, Any]:
         return False
 
     try:
-        # Longer timeout because residential proxies can take 10-15s to route
+        # Longer timeout because residential proxies can take 10-15s to route.
+        # Retry up to 3 times — residential proxies (proxy-jet, brightdata,
+        # etc.) have ~10-20% per-request failure rate due to rotating exit
+        # nodes; retrying the same proxy usually succeeds with a different
+        # exit IP on the next attempt.
         timeout_cfg = httpx.Timeout(30.0, connect=20.0)
-        async with httpx.AsyncClient(proxy=server, timeout=timeout_cfg, headers={"User-Agent": ua}, verify=False, http2=False) as cli:
-            ok = await _try_https_ipwhois(cli)
-            if not ok:
-                ok = await _try_http_ipapi(cli)
-            if ok:
-                cc = (result["country"] or "").lower()
-                lang_map = {
-                    "us": "en-US,en;q=0.9", "gb": "en-GB,en;q=0.9", "ca": "en-CA,en;q=0.9",
-                    "au": "en-AU,en;q=0.9", "nz": "en-NZ,en;q=0.9",
-                    "de": "de-DE,de;q=0.9,en;q=0.7", "fr": "fr-FR,fr;q=0.9,en;q=0.7",
-                    "es": "es-ES,es;q=0.9,en;q=0.7", "it": "it-IT,it;q=0.9,en;q=0.7",
-                    "nl": "nl-NL,nl;q=0.9,en;q=0.7", "pt": "pt-PT,pt;q=0.9,en;q=0.7",
-                    "br": "pt-BR,pt;q=0.9,en;q=0.7", "mx": "es-MX,es;q=0.9,en;q=0.7",
-                    "jp": "ja-JP,ja;q=0.9,en;q=0.7", "kr": "ko-KR,ko;q=0.9,en;q=0.7",
-                    "in": "en-IN,en;q=0.9,hi;q=0.8", "pk": "en-PK,en;q=0.9,ur;q=0.8",
-                    "ae": "ar-AE,ar;q=0.9,en;q=0.8", "sa": "ar-SA,ar;q=0.9,en;q=0.8",
-                }
-                locale_map = {
-                    "us": "en-US", "gb": "en-GB", "ca": "en-CA", "au": "en-AU", "nz": "en-NZ",
-                    "de": "de-DE", "fr": "fr-FR", "es": "es-ES", "it": "it-IT", "nl": "nl-NL",
-                    "pt": "pt-PT", "br": "pt-BR", "mx": "es-MX", "jp": "ja-JP", "kr": "ko-KR",
-                    "in": "en-IN", "pk": "en-PK", "ae": "ar-AE", "sa": "ar-SA",
-                }
-                result["accept_language"] = lang_map.get(cc, "en-US,en;q=0.9")
-                result["locale"] = locale_map.get(cc, "en-US")
-                result["ok"] = True
+        ok = False
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(proxy=server, timeout=timeout_cfg, headers={"User-Agent": ua}, verify=False, http2=False) as cli:
+                    ok = await _try_https_ipwhois(cli)
+                    if not ok:
+                        ok = await _try_http_ipapi(cli)
+                if ok:
+                    break
+            except Exception as e:
+                logger.debug(f"Proxy probe attempt {attempt+1} failed: {e}")
+            # Brief backoff before next attempt
+            if attempt < 2:
+                await asyncio.sleep(1.5 * (attempt + 1))
+        if ok:
+            cc = (result["country"] or "").lower()
+            lang_map = {
+                "us": "en-US,en;q=0.9", "gb": "en-GB,en;q=0.9", "ca": "en-CA,en;q=0.9",
+                "au": "en-AU,en;q=0.9", "nz": "en-NZ,en;q=0.9",
+                "de": "de-DE,de;q=0.9,en;q=0.7", "fr": "fr-FR,fr;q=0.9,en;q=0.7",
+                "es": "es-ES,es;q=0.9,en;q=0.7", "it": "it-IT,it;q=0.9,en;q=0.7",
+                "nl": "nl-NL,nl;q=0.9,en;q=0.7", "pt": "pt-PT,pt;q=0.9,en;q=0.7",
+                "br": "pt-BR,pt;q=0.9,en;q=0.7", "mx": "es-MX,es;q=0.9,en;q=0.7",
+                "jp": "ja-JP,ja;q=0.9,en;q=0.7", "kr": "ko-KR,ko;q=0.9,en;q=0.7",
+                "in": "en-IN,en;q=0.9,hi;q=0.8", "pk": "en-PK,en;q=0.9,ur;q=0.8",
+                "ae": "ar-AE,ar;q=0.9,en;q=0.8", "sa": "ar-SA,ar;q=0.9,en;q=0.8",
+            }
+            locale_map = {
+                "us": "en-US", "gb": "en-GB", "ca": "en-CA", "au": "en-AU", "nz": "en-NZ",
+                "de": "de-DE", "fr": "fr-FR", "es": "es-ES", "it": "it-IT", "nl": "nl-NL",
+                "pt": "pt-PT", "br": "pt-BR", "mx": "es-MX", "jp": "ja-JP", "kr": "ko-KR",
+                "in": "en-IN", "pk": "en-PK", "ae": "ar-AE", "sa": "ar-SA",
+            }
+            result["accept_language"] = lang_map.get(cc, "en-US,en;q=0.9")
+            result["locale"] = locale_map.get(cc, "en-US")
+            result["ok"] = True
     except Exception as e:
         logger.debug(f"Proxy geo probe failed: {e}")
     return result
@@ -1015,6 +1029,22 @@ async def run_real_user_traffic_job(
                 try:
                     resp = await page.goto(target_url, timeout=45000, wait_until="domcontentloaded")
                     entry["http_status"] = str(resp.status) if resp else ""
+                    # Detect chrome-error pages — happens when the residential
+                    # proxy's egress tunnel breaks mid-navigation or DNS
+                    # fails. Marking these as failures (instead of "ok")
+                    # prevents false-positive success counts and triggers
+                    # the upstream retry/reporting path correctly.
+                    try:
+                        cur_url = (page.url or "")
+                    except Exception:
+                        cur_url = ""
+                    if cur_url.startswith("chrome-error://") or cur_url.startswith("chrome://network-error"):
+                        entry["status"] = "failed"
+                        entry["error"] = f"Browser navigation error (proxy tunnel broken): {cur_url}"
+                        push_live_step(job_id, i + 1, "browser", "failed",
+                                       f"Navigation error: {cur_url[:80]}")
+                        await context.close()
+                        return await _record(job_id, entry, report, report_lock, db)
                     # Grab a lightweight landing thumbnail so the Live Activity
                     # modal can prove the browser really loaded the page.
                     try:
@@ -1266,6 +1296,19 @@ async def run_real_user_traffic_job(
                     entry["final_url"] = page.url
                 except Exception:
                     pass
+
+                # Detect mid-navigation proxy tunnel breaks — if after the
+                # post-submit wait the page is sitting on a Chromium internal
+                # error URL, the visit did NOT actually reach any real page.
+                # Mark as failed so conversion stats and downstream retries
+                # behave correctly.
+                _fu = entry.get("final_url", "") or ""
+                if _fu.startswith("chrome-error://") or _fu.startswith("chrome://network-error"):
+                    entry["status"] = "failed"
+                    if not entry.get("error"):
+                        entry["error"] = f"Browser navigation error (proxy tunnel broken mid-flow): {_fu}"
+                    push_live_step(job_id, i + 1, "nav", "failed",
+                                   f"Navigation error after submit: {_fu[:80]}")
 
                 # STRICT thank-you page detection: needs host change + URL
                 # keyword + page text keyword. Only TRUE thank-you pages

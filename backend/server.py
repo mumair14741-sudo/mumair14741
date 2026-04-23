@@ -3283,33 +3283,59 @@ def _is_local_or_private_host(url: str) -> bool:
         return False
 
 
+def _is_emergent_preview_host(url: str) -> bool:
+    """Detect Emergent preview-pod hosts. These are behind a Cloudflare /
+    Kubernetes-ingress bot-protection layer that returns HTTP 403 + captcha
+    for requests coming from commercial residential-proxy egress IPs. So if
+    the RUT engine is asked to hit the tracker URL on THIS preview pod
+    through a residential proxy, EVERY visit will land on a captcha page and
+    the form will never be reached. When we detect this case we auto-swap
+    the browser destination to the link's `offer_url` (direct advertiser
+    URL) so the form-fill + conversion flow actually works in the preview."""
+    try:
+        from urllib.parse import urlparse
+        h = (urlparse(url or "").hostname or "").lower()
+        if not h:
+            return False
+        return (
+            h.endswith(".preview.emergentagent.com")
+            or h.endswith(".preview.emergent.host")
+            or h.endswith(".preview.emergent.sh")
+        )
+    except Exception:
+        return False
+
+
 def _rut_build_target_url(request: Request, link: dict, explicit_target: Optional[str]) -> str:
     sc = link["short_code"]
+    offer = (link.get("offer_url") or link.get("destination_url") or "").strip()
+    offer_is_public = bool(
+        offer
+        and offer.lower().startswith(("http://", "https://"))
+        and not _is_local_or_private_host(offer)
+        and not _is_emergent_preview_host(offer)
+    )
     if explicit_target and explicit_target.strip():
         tu = explicit_target.strip().rstrip("/")
         # If user already provided a complete URL (starts with http/https),
         # use it AS-IS — supports both tracker URLs ("…/t/abc") and direct
         # offer URLs (bypass tracker for form-fill-only testing).
         if tu.lower().startswith(("http://", "https://")):
-            # Local host detection — if the target is localhost / private IP
-            # (unreachable through a public proxy), auto-swap to the link's
+            # Local host OR Emergent preview host — unreachable/blocked
+            # through a public residential proxy; auto-swap to the link's
             # offer_url so the browser can actually reach the landing page.
-            if _is_local_or_private_host(tu):
-                offer = link.get("offer_url") or link.get("destination_url")
-                if offer and offer.strip().lower().startswith(("http://", "https://")) \
-                        and not _is_local_or_private_host(offer):
-                    return offer.strip()
+            if _is_local_or_private_host(tu) or _is_emergent_preview_host(tu):
+                if offer_is_public:
+                    return offer
             return tu
         # Bare host like "yourdomain.com" → append tracker path
         return f"{tu}/api/t/{sc}"
     public_base = os.environ.get("PUBLIC_BASE_URL") or os.environ.get("REACT_APP_BACKEND_URL") or ""
     if public_base and public_base.startswith("http"):
         candidate = f"{public_base.rstrip('/')}/api/t/{sc}"
-        if _is_local_or_private_host(candidate):
-            offer = link.get("offer_url") or link.get("destination_url")
-            if offer and offer.strip().lower().startswith(("http://", "https://")) \
-                    and not _is_local_or_private_host(offer):
-                return offer.strip()
+        if _is_local_or_private_host(candidate) or _is_emergent_preview_host(candidate):
+            if offer_is_public:
+                return offer
         return candidate
     try:
         fwd_proto = request.headers.get("x-forwarded-proto") or request.url.scheme or "https"
@@ -3318,11 +3344,9 @@ def _rut_build_target_url(request: Request, link: dict, explicit_target: Optiona
             scheme = fwd_proto.split(",")[0].strip()
             host = fwd_host.split(",")[0].strip()
             candidate = f"{scheme}://{host}/api/t/{sc}"
-            if _is_local_or_private_host(candidate):
-                offer = link.get("offer_url") or link.get("destination_url")
-                if offer and offer.strip().lower().startswith(("http://", "https://")) \
-                        and not _is_local_or_private_host(offer):
-                    return offer.strip()
+            if _is_local_or_private_host(candidate) or _is_emergent_preview_host(candidate):
+                if offer_is_public:
+                    return offer
             return candidate
     except Exception:
         pass
