@@ -9959,6 +9959,60 @@ async def startup_db_indexes():
     except Exception as e:
         logger.warning(f"Could not schedule UA versions auto-refresh: {e}")
 
+    # Ensure Playwright Chromium (headless-shell) is installed for
+    # Real-User-Traffic / Form-Filler. The pod ships with a default
+    # chromium_headless_shell but its build version may not match the
+    # pinned playwright version; also some pod restarts wipe ad-hoc
+    # installs. This startup check installs the matching browser if
+    # missing — runs in a background task so it never blocks server boot.
+    async def _ensure_playwright_chromium():
+        try:
+            browsers_root = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/pw-browsers")
+            # Fast path: if any matching headless_shell binary is already present
+            # AND it looks complete, skip the expensive install call.
+            try:
+                any_ready = any(
+                    (p / "chrome-linux" / "headless_shell").exists()
+                    for p in Path(browsers_root).glob("chromium_headless_shell-*")
+                )
+            except Exception:
+                any_ready = False
+            # Still call `playwright install` — it is IDEMPOTENT and returns
+            # in <1s when the browser is already present; downloads ~100MB
+            # only when the version pinned by the installed playwright
+            # package is missing. This recovers from pod restarts that
+            # wipe ad-hoc browser installs.
+            logger.info(
+                f"Ensuring Playwright chromium-headless-shell is installed "
+                f"(current={'present' if any_ready else 'missing'})…"
+            )
+            proc = await asyncio.create_subprocess_exec(
+                "playwright", "install", "chromium-headless-shell",
+                env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": browsers_root},
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                _out, err = await asyncio.wait_for(proc.communicate(), timeout=300)
+                if proc.returncode == 0:
+                    logger.info("Playwright chromium-headless-shell install: OK")
+                else:
+                    logger.warning(
+                        f"Playwright install returned {proc.returncode}: "
+                        f"{(err or b'').decode(errors='ignore')[:300]}"
+                    )
+            except asyncio.TimeoutError:
+                try: proc.kill()
+                except Exception: pass
+                logger.warning("Playwright install timed out after 5 min")
+        except Exception as e:
+            logger.warning(f"Playwright install startup hook failed (non-fatal): {e}")
+
+    try:
+        asyncio.create_task(_ensure_playwright_chromium())
+    except Exception as e:
+        logger.warning(f"Could not schedule Playwright install check: {e}")
+
     # Reap orphan Real-User-Traffic jobs whose worker died before they could
     # mark themselves done. Without this, the UI keeps showing a permanent
     # "running" job that can never be stopped (the in-memory entry is gone).
