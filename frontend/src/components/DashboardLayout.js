@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Link2, MousePointerClick, DollarSign, Server, Menu, LogOut, User, Settings, TrendingUp, Upload, Mail, Filter, Smartphone, Search, ClipboardCheck, Fingerprint } from "lucide-react";
+import { LayoutDashboard, Link2, MousePointerClick, DollarSign, Server, Menu, LogOut, User, Settings, TrendingUp, Upload, Mail, Filter, Smartphone, Search, ClipboardCheck, Fingerprint, Package } from "lucide-react";
 import { Button } from "./ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { useBranding } from "../context/BrandingContext";
@@ -69,6 +69,7 @@ export default function DashboardLayout({ children }) {
     { name: "UA Checker", path: "/ua-checker", icon: Search, feature: "ua_generator" },
     { name: "Form Filler", path: "/form-filler", icon: ClipboardCheck, feature: "form_filler" },
     { name: "Real User Traffic", path: "/real-user-traffic", icon: Fingerprint, feature: "real_user_traffic" },
+    { name: "Uploaded Things", path: "/uploaded-things", icon: Package, feature: "real_user_traffic" },
     { name: "Conversions", path: "/conversions", icon: DollarSign, feature: "conversions" },
     { name: "Proxies", path: "/proxies", icon: Server, feature: "proxies" },
   ];

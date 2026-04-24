@@ -94,6 +94,12 @@ export default function RealUserTrafficPage() {
   const [userAgents, setUserAgents] = useState("");
   const [useStoredProxies, setUseStoredProxies] = useState(false);
 
+  // Uploaded Things — saved batch IDs (alternative to paste)
+  const [uploadedLibrary, setUploadedLibrary] = useState([]);
+  const [selectedUploadProxyId, setSelectedUploadProxyId] = useState("");
+  const [selectedUploadUaId, setSelectedUploadUaId] = useState("");
+  const [selectedUploadDataId, setSelectedUploadDataId] = useState("");
+
   // Run settings
   const [totalClicks, setTotalClicks] = useState(10);
   const [concurrency, setConcurrency] = useState(3);
@@ -252,11 +258,24 @@ export default function RealUserTrafficPage() {
     fetchLinks();
     fetchJobs();
     fetchPendingCandidates();
+    fetchUploadedLibrary();
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
       if (liveTimerRef.current) clearInterval(liveTimerRef.current);
     };
   }, []);
+
+  const fetchUploadedLibrary = async () => {
+    try {
+      const r = await fetch(`${API_URL}/api/uploads`, { headers: authH() });
+      if (r.ok) {
+        const data = await r.json();
+        setUploadedLibrary(data || []);
+      }
+    } catch (e) {
+      // silent — feature may not be enabled for this user
+    }
+  };
 
   // ─── Helpers ──────────────────────────────────────────────────
   const toggleCountry = (c) => {
@@ -321,10 +340,17 @@ export default function RealUserTrafficPage() {
 
   const onStart = async () => {
     if (!linkId) return toast.error("Select a tracker link");
-    if (!useStoredProxies && !proxies.trim()) return toast.error("Paste proxies or enable 'Use my stored proxies'");
-    if (!userAgents.trim()) return toast.error("Paste at least one User Agent");
+    // Validation: either paste OR uploaded batch must be present
+    if (!useStoredProxies && !selectedUploadProxyId && !proxies.trim()) {
+      return toast.error("Paste proxies, select an uploaded proxy batch, or enable 'Use my stored proxies'");
+    }
+    if (!selectedUploadUaId && !userAgents.trim()) {
+      return toast.error("Paste at least one User Agent or select an uploaded UA batch");
+    }
     if (formFillEnabled) {
-      if (dataSource === "excel" && !file) return toast.error("Upload the leads Excel/CSV file");
+      if (dataSource === "excel" && !file && !selectedUploadDataId) {
+        return toast.error("Upload the leads Excel/CSV file or select an uploaded data file");
+      }
       if (dataSource === "gsheet" && !gsheetUrl.trim()) return toast.error("Paste the Google Sheet URL");
       if (dataSource === "pending_from_job" && !importPendingJobId) return toast.error("Select a previous job to import pending leads from");
       if (useCustomJson) {
@@ -343,6 +369,12 @@ export default function RealUserTrafficPage() {
       fd.append("proxies", proxies);
       fd.append("user_agents", userAgents);
       fd.append("use_stored_proxies", String(useStoredProxies));
+      // Uploaded batches — backend prefers these over pasted content
+      if (selectedUploadProxyId) fd.append("upload_proxy_id", selectedUploadProxyId);
+      if (selectedUploadUaId) fd.append("upload_ua_id", selectedUploadUaId);
+      if (formFillEnabled && dataSource === "excel" && selectedUploadDataId) {
+        fd.append("upload_data_file_id", selectedUploadDataId);
+      }
 
       fd.append("total_clicks", String(totalClicks));
       fd.append("concurrency", String(concurrency));
@@ -390,7 +422,14 @@ export default function RealUserTrafficPage() {
         throw new Error(msg);
       }
       toast.success(`Job started: ${data.total} visit(s) queued`);
+      // Clear selected uploaded batches — they'll be deleted server-side
+      // when the job finishes. Also refresh the library so the UI reflects
+      // what's still available for future campaigns.
+      setSelectedUploadProxyId("");
+      setSelectedUploadUaId("");
+      setSelectedUploadDataId("");
       await fetchJobs();
+      fetchUploadedLibrary();
       startPolling(data.job_id);
     } catch (e) {
       // Better diagnostics: "Failed to fetch" is usually a network/ingress abort
@@ -579,32 +618,80 @@ export default function RealUserTrafficPage() {
                   Use my stored proxies
                 </label>
               </div>
+              {/* Uploaded proxy batch picker */}
+              {uploadedLibrary.filter(u => u.type === "proxies").length > 0 && (
+                <div className="mb-2 p-2 bg-indigo-950/30 border border-indigo-900/50 rounded">
+                  <Label className="text-indigo-300 text-xs mb-1 block">
+                    Or pick a saved batch from <span className="font-semibold">Uploaded Things</span> (auto-deletes after use)
+                  </Label>
+                  <select
+                    value={selectedUploadProxyId}
+                    onChange={(e) => setSelectedUploadProxyId(e.target.value)}
+                    className="w-full h-8 px-2 rounded bg-zinc-800 border border-zinc-700 text-zinc-100 text-xs"
+                    data-testid="rut-upload-proxy-id"
+                  >
+                    <option value="">— paste manually below —</option>
+                    {uploadedLibrary.filter(u => u.type === "proxies").map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name} · {u.country_tag || "?"}{u.state_tag ? `/${u.state_tag}` : ""} · {u.item_count} proxies
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <Textarea
                 data-testid="rut-proxies"
-                rows={9}
+                rows={selectedUploadProxyId ? 5 : 9}
                 placeholder={"user:pass@host:port\nuser:pass@host:port"}
                 value={proxies}
                 onChange={(e) => setProxies(e.target.value)}
-                disabled={useStoredProxies}
+                disabled={useStoredProxies || !!selectedUploadProxyId}
                 className="bg-zinc-800 border-zinc-700 text-zinc-100 font-mono text-xs disabled:opacity-50"
               />
               <p className="text-xs text-zinc-500 mt-1">
-                {useStoredProxies ? "Using your saved proxies from the Proxies page." : `${proxyCount} proxies`}
+                {selectedUploadProxyId
+                  ? "Using uploaded batch (will auto-delete after job)"
+                  : useStoredProxies
+                    ? "Using your saved proxies from the Proxies page."
+                    : `${proxyCount} proxies`}
               </p>
             </div>
             <div>
               <Label className="text-zinc-300 mb-1 block">User Agents (one per line)</Label>
+              {/* Uploaded UA batch picker */}
+              {uploadedLibrary.filter(u => u.type === "user_agents").length > 0 && (
+                <div className="mb-2 p-2 bg-indigo-950/30 border border-indigo-900/50 rounded">
+                  <Label className="text-indigo-300 text-xs mb-1 block">
+                    Or pick a saved batch from <span className="font-semibold">Uploaded Things</span> (auto-deletes after use)
+                  </Label>
+                  <select
+                    value={selectedUploadUaId}
+                    onChange={(e) => setSelectedUploadUaId(e.target.value)}
+                    className="w-full h-8 px-2 rounded bg-zinc-800 border border-zinc-700 text-zinc-100 text-xs"
+                    data-testid="rut-upload-ua-id"
+                  >
+                    <option value="">— paste manually below —</option>
+                    {uploadedLibrary.filter(u => u.type === "user_agents").map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name} · {u.os_tag || "?"}{u.network_tag ? `/${u.network_tag}` : ""} · {u.item_count} UAs
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <Textarea
                 data-testid="rut-user-agents"
-                rows={9}
+                rows={selectedUploadUaId ? 5 : 9}
                 placeholder={"Mozilla/5.0 (Linux; Android 15; SM-S928U) AppleWebKit/...\nMozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) ..."}
                 value={userAgents}
                 onChange={(e) => setUserAgents(e.target.value)}
-                className="bg-zinc-800 border-zinc-700 text-zinc-100 font-mono text-xs"
+                disabled={!!selectedUploadUaId}
+                className="bg-zinc-800 border-zinc-700 text-zinc-100 font-mono text-xs disabled:opacity-50"
               />
               <p className="text-xs text-zinc-500 mt-1">
-                {uaCount} UAs · system auto-detects OS + device from each UA and matches viewport,
-                platform, touch & canvas/WebGL spoof
+                {selectedUploadUaId
+                  ? "Using uploaded batch (will auto-delete after job)"
+                  : `${uaCount} UAs · system auto-detects OS + device from each UA and matches viewport, platform, touch & canvas/WebGL spoof`}
               </p>
             </div>
           </div>
@@ -951,13 +1038,40 @@ export default function RealUserTrafficPage() {
                 </button>
               </div>
               {dataSource === "excel" ? (
-                <Input
-                  data-testid="rut-file"
-                  type="file"
-                  accept=".xlsx,.xls,.csv"
-                  onChange={(e) => setFile(e.target.files?.[0] || null)}
-                  className="mt-2 bg-zinc-800 border-zinc-700 text-zinc-100 file:text-zinc-100 file:bg-zinc-700 file:border-0 file:rounded"
-                />
+                <div className="mt-2 space-y-2">
+                  {/* Uploaded data file picker */}
+                  {uploadedLibrary.filter(u => u.type === "data_file").length > 0 && (
+                    <div className="p-2 bg-indigo-950/30 border border-indigo-900/50 rounded">
+                      <Label className="text-indigo-300 text-xs mb-1 block">
+                        Or pick a saved file from <span className="font-semibold">Uploaded Things</span> (auto-deletes after use)
+                      </Label>
+                      <select
+                        value={selectedUploadDataId}
+                        onChange={(e) => setSelectedUploadDataId(e.target.value)}
+                        className="w-full h-8 px-2 rounded bg-zinc-800 border border-zinc-700 text-zinc-100 text-xs"
+                        data-testid="rut-upload-data-id"
+                      >
+                        <option value="">— upload manually below —</option>
+                        {uploadedLibrary.filter(u => u.type === "data_file").map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {u.name} · {u.item_count} rows · {u.file_name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  <Input
+                    data-testid="rut-file"
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    onChange={(e) => setFile(e.target.files?.[0] || null)}
+                    disabled={!!selectedUploadDataId}
+                    className="bg-zinc-800 border-zinc-700 text-zinc-100 file:text-zinc-100 file:bg-zinc-700 file:border-0 file:rounded disabled:opacity-50"
+                  />
+                  {selectedUploadDataId && (
+                    <p className="text-xs text-zinc-500">Using uploaded batch (will auto-delete after job)</p>
+                  )}
+                </div>
               ) : dataSource === "gsheet" ? (
                 <Input
                   data-testid="rut-gsheet-url"

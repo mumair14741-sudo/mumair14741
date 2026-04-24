@@ -19,6 +19,7 @@ import UserAgentGeneratorPage from "./pages/UserAgentGeneratorPage";
 import UserAgentCheckerPage from "./pages/UserAgentCheckerPage";
 import FormFillerPage from "./pages/FormFillerPage";
 import RealUserTrafficPage from "./pages/RealUserTrafficPage";
+import UploadedThingsPage from "./pages/UploadedThingsPage";
 import AdminLoginPage from "./pages/AdminLoginPage";
 import AdminDashboard from "./pages/AdminDashboard";
 import { Toaster } from "./components/ui/sonner";
@@ -152,6 +153,11 @@ function App() {
                       <Route path="/real-user-traffic" element={
                         <FeatureRoute feature="real_user_traffic">
                           <RealUserTrafficPage />
+                        </FeatureRoute>
+                      } />
+                      <Route path="/uploaded-things" element={
+                        <FeatureRoute feature="real_user_traffic">
+                          <UploadedThingsPage />
                         </FeatureRoute>
                       } />
                       <Route path="/settings" element={

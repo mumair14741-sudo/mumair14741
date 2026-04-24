@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timezone, timedelta
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -3365,7 +3365,7 @@ async def rut_create_job(
     target_url: Optional[str] = Form(None),
     # Traffic source
     proxies: str = Form(""),                          # newline-separated
-    user_agents: str = Form(...),                     # newline-separated
+    user_agents: str = Form(""),                     # newline-separated (optional if upload_ua_id provided)
     use_stored_proxies: bool = Form(False),
     # Run settings
     total_clicks: int = Form(10),
@@ -3397,10 +3397,19 @@ async def rut_create_job(
     automation_json: Optional[str] = Form(None),      # custom step-list JSON
     self_heal: bool = Form(True),                     # AI fallback for unexpected popups
     file: Optional[UploadFile] = File(None),
+    # Uploaded Things — optional batch IDs from the "Uploaded Things" page.
+    # When provided, items are loaded from those saved batches AND the
+    # batch is auto-deleted when the job finishes so it never repeats.
+    upload_ua_id: Optional[str] = Form(None),
+    upload_proxy_id: Optional[str] = Form(None),
+    upload_data_file_id: Optional[str] = Form(None),
     user: dict = Depends(get_current_user_with_fresh_data),
 ):
     """Kick off a real-user-traffic run. Combines real-traffic + optional form-fill."""
     check_user_feature(user, "real_user_traffic")
+
+    # Track which uploaded-batch IDs should be deleted after the job finishes.
+    consume_upload_ids: List[str] = []
 
     # 1. Link ownership
     link = await db.links.find_one({"id": link_id, "user_id": user["id"]}, {"_id": 0})
@@ -3428,8 +3437,14 @@ async def rut_create_job(
         if max_attempts and max_attempts < target_conversions:
             raise HTTPException(status_code=400, detail="max_attempts must be >= target_conversions")
 
-    # 3. Proxies — either paste or stored
-    if use_stored_proxies:
+    # 3. Proxies — either paste OR stored OR from an uploaded batch
+    if upload_proxy_id:
+        uploaded_proxy_lines = await _load_upload_items(user["id"], upload_proxy_id, "proxies")
+        if not uploaded_proxy_lines:
+            raise HTTPException(status_code=404, detail="Selected proxy upload is empty or not found")
+        proxy_lines = uploaded_proxy_lines
+        consume_upload_ids.append(upload_proxy_id)
+    elif use_stored_proxies:
         stored = await db.proxies.find(
             {"user_id": user["id"], "status": {"$in": ["working", "active", None]}},
             {"_id": 0, "proxy_string": 1},
@@ -3442,10 +3457,17 @@ async def rut_create_job(
         if not proxy_lines:
             raise HTTPException(status_code=400, detail="At least one proxy required")
 
-    # 4. User agents
-    ua_lines = [ln for ln in (user_agents or "").splitlines() if ln.strip()]
-    if not ua_lines:
-        raise HTTPException(status_code=400, detail="At least one User Agent required")
+    # 4. User agents — either paste OR from an uploaded batch
+    if upload_ua_id:
+        uploaded_ua_lines = await _load_upload_items(user["id"], upload_ua_id, "user_agents")
+        if not uploaded_ua_lines:
+            raise HTTPException(status_code=404, detail="Selected user-agent upload is empty or not found")
+        ua_lines = uploaded_ua_lines
+        consume_upload_ids.append(upload_ua_id)
+    else:
+        ua_lines = [ln for ln in (user_agents or "").splitlines() if ln.strip()]
+        if not ua_lines:
+            raise HTTPException(status_code=400, detail="At least one User Agent required")
 
     # 5. Form fill leads (only if enabled)
     rows: Optional[List[Dict[str, Any]]] = None
@@ -3478,13 +3500,28 @@ async def rut_create_job(
             except Exception as e:
                 raise HTTPException(status_code=400, detail=f"Google Sheet load failed: {e}")
         else:
-            if not file:
-                raise HTTPException(status_code=400, detail="Excel/CSV file required when form fill is enabled")
-            content = await file.read()
-            try:
-                rows = load_rows_from_excel(content, file.filename or "data.xlsx")
-            except Exception as e:
-                raise HTTPException(status_code=400, detail=f"File parse failed: {e}")
+            # Excel source — prefer uploaded-batch data_file if provided, else
+            # use the inline multipart file upload.
+            if upload_data_file_id:
+                pair = await _load_upload_data_file(user["id"], upload_data_file_id)
+                if not pair:
+                    raise HTTPException(status_code=404, detail="Selected data-file upload not found")
+                fp, orig_name = pair
+                try:
+                    with open(fp, "rb") as fh:
+                        content = fh.read()
+                    rows = load_rows_from_excel(content, orig_name)
+                except Exception as e:
+                    raise HTTPException(status_code=400, detail=f"Saved data file parse failed: {e}")
+                consume_upload_ids.append(upload_data_file_id)
+            else:
+                if not file:
+                    raise HTTPException(status_code=400, detail="Excel/CSV file required when form fill is enabled")
+                content = await file.read()
+                try:
+                    rows = load_rows_from_excel(content, file.filename or "data.xlsx")
+                except Exception as e:
+                    raise HTTPException(status_code=400, detail=f"File parse failed: {e}")
         if not rows:
             raise HTTPException(status_code=400, detail="No rows in uploaded file")
 
@@ -3536,7 +3573,9 @@ async def rut_create_job(
         form_fill_enabled=form_fill_enabled,
     )
     await db.real_user_traffic_jobs.update_one(
-        {"job_id": job_id}, {"$set": {**job, "user_id": user["id"]}}, upsert=True
+        {"job_id": job_id},
+        {"$set": {**job, "user_id": user["id"], "consume_upload_ids": consume_upload_ids}},
+        upsert=True,
     )
 
     background.add_task(
@@ -9931,6 +9970,274 @@ async def redirect_link(short_code: str, request: Request, sub1: str = "", sub2:
         headers["Referrer-Policy"] = "origin"
     
     return RedirectResponse(url=destination_url, status_code=302, headers=headers)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Uploaded Resources (reusable UA / Proxy / Data-file library)
+# ═══════════════════════════════════════════════════════════════════
+# User can upload batches of user-agents, proxies, or data files ONCE
+# and then pick them from the RUT "Start campaign" form instead of
+# pasting every time. Consumed batches auto-delete after the job
+# completes so the same leads/proxies are never used twice.
+# ───────────────────────────────────────────────────────────────────
+
+UPLOADS_DATA_DIR = Path("/app/backend/uploaded_resources")
+UPLOADS_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+UPLOAD_TYPES = {"user_agents", "proxies", "data_file"}
+
+
+class UploadedResourceResponse(BaseModel):
+    id: str
+    user_id: str
+    type: str
+    name: str
+    os_tag: Optional[str] = None
+    network_tag: Optional[str] = None
+    country_tag: Optional[str] = None
+    state_tag: Optional[str] = None
+    item_count: int = 0
+    file_name: Optional[str] = None
+    created_at: datetime
+
+
+def _upload_doc_to_response(doc: dict) -> dict:
+    return {
+        "id": doc["id"],
+        "user_id": doc.get("user_id", ""),
+        "type": doc["type"],
+        "name": doc.get("name", ""),
+        "os_tag": doc.get("os_tag"),
+        "network_tag": doc.get("network_tag"),
+        "country_tag": doc.get("country_tag"),
+        "state_tag": doc.get("state_tag"),
+        "item_count": int(doc.get("item_count", 0)),
+        "file_name": doc.get("file_name"),
+        "created_at": doc.get("created_at", datetime.now(timezone.utc)).isoformat() if isinstance(doc.get("created_at"), datetime) else (doc.get("created_at") or ""),
+    }
+
+
+@api_router.post("/uploads/user-agents", response_model=UploadedResourceResponse)
+async def upload_user_agents(
+    name: str = Form(...),
+    os_tag: Optional[str] = Form(None),
+    network_tag: Optional[str] = Form(None),
+    user_agents: str = Form(...),
+    current_user: dict = Depends(get_current_user_with_fresh_data),
+):
+    check_user_feature(current_user, "real_user_traffic")
+    items = [ln.strip() for ln in (user_agents or "").splitlines() if ln.strip()]
+    if not items:
+        raise HTTPException(status_code=400, detail="No user-agents provided")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "user_id": current_user["id"],
+        "type": "user_agents",
+        "name": name.strip() or f"UA batch ({len(items)})",
+        "os_tag": (os_tag or "").strip().lower() or None,
+        "network_tag": (network_tag or "").strip().lower() or None,
+        "country_tag": None,
+        "state_tag": None,
+        "items": items,
+        "item_count": len(items),
+        "file_name": None,
+        "created_at": datetime.now(timezone.utc),
+    }
+    user_db = get_user_db(current_user["id"])
+    await user_db["uploaded_resources"].insert_one(doc)
+    return _upload_doc_to_response(doc)
+
+
+@api_router.post("/uploads/proxies", response_model=UploadedResourceResponse)
+async def upload_proxies(
+    name: str = Form(...),
+    country_tag: Optional[str] = Form(None),
+    state_tag: Optional[str] = Form(None),
+    proxies: str = Form(...),
+    current_user: dict = Depends(get_current_user_with_fresh_data),
+):
+    check_user_feature(current_user, "real_user_traffic")
+    items = [ln.strip() for ln in (proxies or "").splitlines() if ln.strip()]
+    if not items:
+        raise HTTPException(status_code=400, detail="No proxies provided")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "user_id": current_user["id"],
+        "type": "proxies",
+        "name": name.strip() or f"Proxy batch ({len(items)})",
+        "os_tag": None,
+        "network_tag": None,
+        "country_tag": (country_tag or "").strip().upper() or None,
+        "state_tag": (state_tag or "").strip().upper() or None,
+        "items": items,
+        "item_count": len(items),
+        "file_name": None,
+        "created_at": datetime.now(timezone.utc),
+    }
+    user_db = get_user_db(current_user["id"])
+    await user_db["uploaded_resources"].insert_one(doc)
+    return _upload_doc_to_response(doc)
+
+
+@api_router.post("/uploads/data-file", response_model=UploadedResourceResponse)
+async def upload_data_file(
+    name: str = Form(...),
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user_with_fresh_data),
+):
+    check_user_feature(current_user, "real_user_traffic")
+    doc_id = str(uuid.uuid4())
+    user_dir = UPLOADS_DATA_DIR / current_user["id"]
+    user_dir.mkdir(parents=True, exist_ok=True)
+    import re as _re
+    safe_name = _re.sub(r"[^A-Za-z0-9_.\-]", "_", file.filename or "leads.xlsx")
+    stored_path = user_dir / f"{doc_id}__{safe_name}"
+    contents = await file.read()
+    if not contents:
+        raise HTTPException(status_code=400, detail="Empty file")
+    with open(stored_path, "wb") as fh:
+        fh.write(contents)
+    # Try to count rows
+    item_count = 0
+    try:
+        import pandas as pd
+        ext = (file.filename or "").lower().rsplit(".", 1)[-1]
+        if ext == "csv":
+            df = pd.read_csv(stored_path)
+        else:
+            df = pd.read_excel(stored_path)
+        item_count = int(len(df))
+    except Exception:
+        item_count = 0
+    doc = {
+        "id": doc_id,
+        "user_id": current_user["id"],
+        "type": "data_file",
+        "name": name.strip() or (file.filename or "leads"),
+        "os_tag": None, "network_tag": None, "country_tag": None, "state_tag": None,
+        "items": [],
+        "item_count": item_count,
+        "file_name": file.filename,
+        "file_path": str(stored_path),
+        "created_at": datetime.now(timezone.utc),
+    }
+    user_db = get_user_db(current_user["id"])
+    await user_db["uploaded_resources"].insert_one(doc)
+    return _upload_doc_to_response(doc)
+
+
+@api_router.get("/uploads")
+async def list_uploads(
+    type: Optional[str] = None,
+    os: Optional[str] = None,
+    network: Optional[str] = None,
+    country: Optional[str] = None,
+    current_user: dict = Depends(get_current_user_with_fresh_data),
+):
+    check_user_feature(current_user, "real_user_traffic")
+    user_db = get_user_db(current_user["id"])
+    query: Dict[str, Any] = {"user_id": current_user["id"]}
+    if type and type in UPLOAD_TYPES:
+        query["type"] = type
+    if os:
+        query["os_tag"] = os.strip().lower()
+    if network:
+        query["network_tag"] = network.strip().lower()
+    if country:
+        query["country_tag"] = country.strip().upper()
+    cursor = user_db["uploaded_resources"].find(query, {"_id": 0, "items": 0, "file_path": 0}).sort("created_at", -1)
+    out = []
+    async for doc in cursor:
+        out.append(_upload_doc_to_response(doc))
+    return out
+
+
+@api_router.delete("/uploads/{upload_id}")
+async def delete_upload(
+    upload_id: str,
+    current_user: dict = Depends(get_current_user_with_fresh_data),
+):
+    check_user_feature(current_user, "real_user_traffic")
+    user_db = get_user_db(current_user["id"])
+    doc = await user_db["uploaded_resources"].find_one(
+        {"id": upload_id, "user_id": current_user["id"]},
+        {"_id": 0},
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Upload not found")
+    # Remove file if this is a data_file upload
+    fp = doc.get("file_path")
+    if fp:
+        try:
+            Path(fp).unlink(missing_ok=True)
+        except Exception:
+            pass
+    await user_db["uploaded_resources"].delete_one({"id": upload_id, "user_id": current_user["id"]})
+    return {"ok": True, "deleted_id": upload_id}
+
+
+async def _load_upload_items(user_id: str, upload_id: str, expected_type: str) -> List[str]:
+    """Internal helper: load text items (UAs / proxy lines) from an uploaded
+    batch. Returns [] if missing or wrong type."""
+    if not upload_id:
+        return []
+    user_db = get_user_db(user_id)
+    doc = await user_db["uploaded_resources"].find_one(
+        {"id": upload_id, "user_id": user_id, "type": expected_type},
+        {"_id": 0},
+    )
+    if not doc:
+        return []
+    items = doc.get("items") or []
+    return [str(x).strip() for x in items if str(x).strip()]
+
+
+async def _load_upload_data_file(user_id: str, upload_id: str) -> Optional[Tuple[str, str]]:
+    """Returns (file_path, original_filename) for a saved data_file upload
+    or None if not found."""
+    if not upload_id:
+        return None
+    user_db = get_user_db(user_id)
+    doc = await user_db["uploaded_resources"].find_one(
+        {"id": upload_id, "user_id": user_id, "type": "data_file"},
+        {"_id": 0},
+    )
+    if not doc:
+        return None
+    fp = doc.get("file_path")
+    if not fp or not Path(fp).exists():
+        return None
+    return (fp, doc.get("file_name") or "leads.xlsx")
+
+
+async def _consume_uploads(user_id: str, upload_ids: List[str]) -> None:
+    """Delete consumed upload documents + their on-disk files. Called when
+    an RUT job finishes so the batch is never reused."""
+    upload_ids = [u for u in (upload_ids or []) if u]
+    if not upload_ids:
+        return
+    user_db = get_user_db(user_id)
+    # Fetch file paths first
+    try:
+        async for doc in user_db["uploaded_resources"].find(
+            {"id": {"$in": upload_ids}, "user_id": user_id, "type": "data_file"},
+            {"_id": 0, "file_path": 1},
+        ):
+            fp = doc.get("file_path")
+            if fp:
+                try:
+                    Path(fp).unlink(missing_ok=True)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    try:
+        await user_db["uploaded_resources"].delete_many(
+            {"id": {"$in": upload_ids}, "user_id": user_id}
+        )
+    except Exception:
+        pass
+
 
 app.include_router(api_router)
 

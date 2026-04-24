@@ -1633,6 +1633,32 @@ async def run_real_user_traffic_job(
     if db is not None:
         await _persist(db, job_id)
 
+    # Auto-consume any "Uploaded Things" batches that fed this job — we
+    # only learn which ones after persisting, so the consume IDs are
+    # fetched directly from the DB record the API stored.
+    try:
+        if db is not None:
+            job_record = await db.real_user_traffic_jobs.find_one(
+                {"job_id": job_id}, {"_id": 0, "consume_upload_ids": 1, "user_id": 1}
+            )
+            if job_record:
+                upload_ids = job_record.get("consume_upload_ids") or []
+                uid = job_record.get("user_id")
+                if upload_ids and uid:
+                    try:
+                        from server import _consume_uploads  # avoid top-level cycle
+                        await _consume_uploads(uid, upload_ids)
+                        # Clear the consume list so we don't double-process
+                        await db.real_user_traffic_jobs.update_one(
+                            {"job_id": job_id},
+                            {"$set": {"consume_upload_ids": [], "consumed_upload_ids_final": upload_ids}},
+                        )
+                        logger.info(f"RUT job {job_id}: consumed {len(upload_ids)} uploaded batch(es)")
+                    except Exception as e:
+                        logger.warning(f"RUT job {job_id}: upload consume failed: {e}")
+    except Exception as e:
+        logger.warning(f"RUT job {job_id}: post-finish upload consume hook failed: {e}")
+
 
 # ──────────────────────────────────────────────────────────────────
 # Custom Automation JSON executor

@@ -63,3 +63,23 @@ User ka use-case: RUT UI se directly run kar raha tha bina `target_url` field fi
    - `chrome-error://chromewebdata/` / `chrome://network-error` URLs ab properly "failed" mark hote hain (pehle false-positive "ok" aa rahe the) — both at goto AND after post-submit wait
 
 **Verification run (10 visits, concurrency 3, NO `target_url`)**: 8 conversions / 10 visits = **80% conversion rate**. 2 failures dono proxy-provider flakes (ip-api probe failed after 3 retries).
+
+### Session 4 - Jan 2026 (Uploaded Things reusable library)
+Naya feature: "Uploaded Things" page jahan user har device OS / network / proxy location / data file ki batches save kar sakte hain, phir RUT campaign ke time paste karne ke bajay dropdown se pick karein. Consumed batches auto-delete hoti hain to repeat use nahi hota.
+
+**Backend** (`server.py`):
+- New `uploaded_resources` collection (per-user DB) with types: `user_agents`, `proxies`, `data_file`
+- Endpoints: `POST /api/uploads/user-agents` (os + network tags), `POST /api/uploads/proxies` (country + state), `POST /api/uploads/data-file` (multipart XLSX/CSV), `GET /api/uploads?type=&os=&network=&country=`, `DELETE /api/uploads/{id}`
+- Data files stored on disk at `/app/backend/uploaded_resources/<user_id>/`
+- RUT job endpoint extended with `upload_ua_id`, `upload_proxy_id`, `upload_data_file_id` form fields; `user_agents` made optional when `upload_ua_id` provided
+- RUT engine persists `consume_upload_ids` in job record; on job completion (completed/stopped/failed) calls `_consume_uploads()` which `delete_many` the batch documents + removes files from disk
+- Gated behind `real_user_traffic` feature flag (same as RUT page)
+
+**Frontend** (new page `UploadedThingsPage.js` + sidebar link + RUT integration):
+- New route `/uploaded-things` with `Package` icon in sidebar (between Real User Traffic and Conversions)
+- 3-tab UI (User Agents / Proxies / Data Files) — each tab has create-form + list-with-tags + delete
+- OS options: Android, iOS, Windows, macOS, Linux
+- Network/App options: TikTok, Instagram, Facebook, Snapchat, Twitter/X, YouTube, WhatsApp, Telegram, Chrome, Safari, Firefox
+- Country options: US, GB, CA, AU, DE, FR, IN, PK, BR, MX (with free-text state field)
+- RUT page: indigo picker boxes above Proxies + User-Agents textareas + Excel file input; textareas disable when uploaded batch selected
+- Verified end-to-end: 3 batches created → RUT job with all 3 uploaded IDs → conversion attempted → all 3 batches auto-deleted from `GET /api/uploads` after completion
