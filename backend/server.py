@@ -3403,6 +3403,9 @@ async def rut_create_job(
     upload_ua_id: Optional[str] = Form(None),
     upload_proxy_id: Optional[str] = Form(None),
     upload_data_file_id: Optional[str] = Form(None),
+    # Automation-JSON template — picked from the reusable library; NOT
+    # auto-deleted so the same template can be used across many campaigns.
+    upload_automation_json_id: Optional[str] = Form(None),
     user: dict = Depends(get_current_user_with_fresh_data),
 ):
     """Kick off a real-user-traffic run. Combines real-traffic + optional form-fill."""
@@ -3538,12 +3541,19 @@ async def rut_create_job(
     allowed_countries_lc = [c.strip().lower() for c in (allowed_countries or "").split(",") if c.strip()]
     allowed_os_list = [o.strip().lower() for o in (allowed_os or "").split(",") if o.strip()]
 
-    # 7b. Parse custom Automation JSON (if provided)
+    # 7b. Parse custom Automation JSON — paste wins; else load from uploaded template
     automation_steps = None
-    if automation_json and automation_json.strip():
+    automation_source_text = automation_json
+    if (not automation_source_text or not automation_source_text.strip()) and upload_automation_json_id:
+        automation_source_text = await _load_upload_automation_json(user["id"], upload_automation_json_id)
+        if not automation_source_text:
+            raise HTTPException(status_code=404, detail="Selected automation-JSON template not found")
+        # Note: NOT added to consume_upload_ids — automation templates are
+        # reusable across campaigns, NOT auto-deleted.
+    if automation_source_text and automation_source_text.strip():
         try:
             import json as _json
-            parsed = _json.loads(automation_json)
+            parsed = _json.loads(automation_source_text)
             if isinstance(parsed, list):
                 automation_steps = parsed
             elif isinstance(parsed, dict) and isinstance(parsed.get("steps"), list):
@@ -9984,7 +9994,7 @@ async def redirect_link(short_code: str, request: Request, sub1: str = "", sub2:
 UPLOADS_DATA_DIR = Path("/app/backend/uploaded_resources")
 UPLOADS_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-UPLOAD_TYPES = {"user_agents", "proxies", "data_file"}
+UPLOAD_TYPES = {"user_agents", "proxies", "data_file", "automation_json"}
 
 
 class UploadedResourceResponse(BaseModel):
@@ -9998,6 +10008,7 @@ class UploadedResourceResponse(BaseModel):
     state_tag: Optional[str] = None
     item_count: int = 0
     file_name: Optional[str] = None
+    automation_json: Optional[str] = None   # populated only for type=automation_json
     created_at: datetime
 
 
@@ -10013,6 +10024,7 @@ def _upload_doc_to_response(doc: dict) -> dict:
         "state_tag": doc.get("state_tag"),
         "item_count": int(doc.get("item_count", 0)),
         "file_name": doc.get("file_name"),
+        "automation_json": doc.get("automation_json"),
         "created_at": doc.get("created_at", datetime.now(timezone.utc)).isoformat() if isinstance(doc.get("created_at"), datetime) else (doc.get("created_at") or ""),
     }
 
@@ -10126,6 +10138,60 @@ async def upload_data_file(
     return _upload_doc_to_response(doc)
 
 
+@api_router.post("/uploads/automation-json", response_model=UploadedResourceResponse)
+async def upload_automation_json(
+    name: str = Form(...),
+    automation_json: str = Form(...),
+    description: Optional[str] = Form(None),
+    current_user: dict = Depends(get_current_user_with_fresh_data),
+):
+    """Save a reusable Automation-JSON template. Unlike other upload types
+    these are NOT auto-deleted after use — they're meant as a library the
+    user picks from every time they launch a campaign."""
+    check_user_feature(current_user, "real_user_traffic")
+    txt = (automation_json or "").strip()
+    if not txt:
+        raise HTTPException(status_code=400, detail="Automation JSON required")
+    # Validate JSON
+    try:
+        parsed = json.loads(txt)
+        if not isinstance(parsed, list):
+            raise ValueError("Automation JSON must be a top-level JSON array of steps")
+        step_count = len(parsed)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+    doc = {
+        "id": str(uuid.uuid4()),
+        "user_id": current_user["id"],
+        "type": "automation_json",
+        "name": name.strip() or "Automation template",
+        "os_tag": None, "network_tag": None, "country_tag": None, "state_tag": None,
+        "items": [],
+        "automation_json": txt,
+        "description": (description or "").strip() or None,
+        "item_count": step_count,
+        "file_name": None,
+        "created_at": datetime.now(timezone.utc),
+    }
+    user_db = get_user_db(current_user["id"])
+    await user_db["uploaded_resources"].insert_one(doc)
+    return _upload_doc_to_response(doc)
+
+
+async def _load_upload_automation_json(user_id: str, upload_id: str) -> Optional[str]:
+    """Returns the raw automation_json text for a saved template or None."""
+    if not upload_id:
+        return None
+    user_db = get_user_db(user_id)
+    doc = await user_db["uploaded_resources"].find_one(
+        {"id": upload_id, "user_id": user_id, "type": "automation_json"},
+        {"_id": 0},
+    )
+    if not doc:
+        return None
+    return doc.get("automation_json") or None
+
+
 @api_router.get("/uploads")
 async def list_uploads(
     type: Optional[str] = None,
@@ -10145,6 +10211,9 @@ async def list_uploads(
         query["network_tag"] = network.strip().lower()
     if country:
         query["country_tag"] = country.strip().upper()
+    # NOTE: intentionally include `automation_json` field so the UI can
+    # show a preview + let user pick from dropdown. Only `items` and
+    # `file_path` are stripped here (those can be huge).
     cursor = user_db["uploaded_resources"].find(query, {"_id": 0, "items": 0, "file_path": 0}).sort("created_at", -1)
     out = []
     async for doc in cursor:

@@ -31,6 +31,76 @@ from typing import Any, Dict, List, Optional, Tuple
 if not os.environ.get("PLAYWRIGHT_BROWSERS_PATH") and os.path.isdir("/pw-browsers"):
     os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "/pw-browsers"
 
+
+# Serialize concurrent "ensure chromium installed" attempts. The preview pod's
+# ephemeral filesystem can wipe the chromium binary across restarts, and the
+# non-blocking startup hook in server.py may not finish before the first
+# RUT job fires — so before each job launch we synchronously verify the
+# browser is present, installing it with a lock if missing. This guarantees
+# the very first visit NEVER fails with "Executable doesn't exist".
+_CHROMIUM_INSTALL_LOCK = asyncio.Lock()
+
+
+async def _ensure_chromium_available() -> bool:
+    """Returns True when a usable headless_shell binary is present (installing
+    it first if missing). Safe to call before every job — no-op when binary
+    is already present."""
+    browsers_root = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/pw-browsers")
+    try:
+        from pathlib import Path as _P
+        for p in _P(browsers_root).glob("chromium_headless_shell-*"):
+            if (p / "chrome-linux" / "headless_shell").exists():
+                return True
+    except Exception:
+        pass
+    # Missing — install with a lock to prevent duplicate installs when
+    # multiple jobs start in parallel on a fresh pod.
+    async with _CHROMIUM_INSTALL_LOCK:
+        # Re-check after acquiring lock (another coroutine may have just
+        # finished the install while we waited).
+        try:
+            from pathlib import Path as _P
+            for p in _P(browsers_root).glob("chromium_headless_shell-*"):
+                if (p / "chrome-linux" / "headless_shell").exists():
+                    return True
+        except Exception:
+            pass
+        logger.warning("Playwright chromium-headless-shell missing — installing now (this may take ~60s)…")
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "playwright", "install", "chromium-headless-shell",
+                env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": browsers_root},
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                _out, err = await asyncio.wait_for(proc.communicate(), timeout=300)
+            except asyncio.TimeoutError:
+                try: proc.kill()
+                except Exception: pass
+                logger.error("Playwright install timed out after 5 min")
+                return False
+            if proc.returncode != 0:
+                logger.error(
+                    f"Playwright install returned {proc.returncode}: "
+                    f"{(err or b'').decode(errors='ignore')[:300]}"
+                )
+                return False
+            logger.info("Playwright chromium-headless-shell install: OK")
+        except Exception as e:
+            logger.error(f"Playwright install failed: {e}")
+            return False
+        # Final check
+        try:
+            from pathlib import Path as _P
+            for p in _P(browsers_root).glob("chromium_headless_shell-*"):
+                if (p / "chrome-linux" / "headless_shell").exists():
+                    return True
+        except Exception:
+            pass
+        return False
+
+
 import httpx
 import pandas as pd
 from user_agents import parse as ua_parse
@@ -714,6 +784,22 @@ async def run_real_user_traffic_job(
     """
     Main orchestrator. Emits progress into RUT_JOBS[job_id].
     """
+    # Guarantee chromium is installed BEFORE launching any visits.
+    # This is the single robust guard that recovers from pod restarts that
+    # wipe ad-hoc browser installs. First job on a fresh pod will pause
+    # here for ~30-60s while the install runs; subsequent jobs are no-ops
+    # (binary already present).
+    try:
+        push_live_step(job_id, 0, "preflight", "info", "Verifying browser engine…")
+    except Exception:
+        pass
+    ok = await _ensure_chromium_available()
+    if not ok:
+        _finalise(job_id, "failed",
+                  "Playwright chromium-headless-shell could not be installed. "
+                  "Please contact support or retry — the install will be attempted again on the next job.")
+        return
+
     parsed_proxies: List[Dict[str, Any]] = []
     for ln in proxies_raw:
         p = _parse_proxy_line(ln)

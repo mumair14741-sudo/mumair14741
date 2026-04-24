@@ -131,6 +131,7 @@ export default function RealUserTrafficPage() {
   const [postSubmitWait, setPostSubmitWait] = useState(6);
   const [automationJson, setAutomationJson] = useState("");
   const [useCustomJson, setUseCustomJson] = useState(false);
+  const [selectedUploadAjId, setSelectedUploadAjId] = useState("");
   const [selfHeal, setSelfHeal] = useState(true);
 
   // AI Automation Generator state
@@ -354,9 +355,14 @@ export default function RealUserTrafficPage() {
       if (dataSource === "gsheet" && !gsheetUrl.trim()) return toast.error("Paste the Google Sheet URL");
       if (dataSource === "pending_from_job" && !importPendingJobId) return toast.error("Select a previous job to import pending leads from");
       if (useCustomJson) {
-        if (!automationJson.trim()) return toast.error("Paste the custom automation JSON (or disable it)");
-        try { JSON.parse(automationJson); }
-        catch (e) { return toast.error("Automation JSON is not valid: " + e.message); }
+        // Either a saved template is selected OR user pasted JSON
+        if (!selectedUploadAjId && !automationJson.trim()) {
+          return toast.error("Paste the custom automation JSON, pick a saved template, or disable the toggle");
+        }
+        if (!selectedUploadAjId) {
+          try { JSON.parse(automationJson); }
+          catch (e) { return toast.error("Automation JSON is not valid: " + e.message); }
+        }
       }
     }
 
@@ -404,8 +410,12 @@ export default function RealUserTrafficPage() {
         fd.append("invalid_detection_enabled", String(invalidDetectionEnabled));
         fd.append("skip_captcha", String(skipCaptcha));
         fd.append("post_submit_wait", String(postSubmitWait));
-        if (useCustomJson && automationJson.trim()) {
-          fd.append("automation_json", automationJson);
+        if (useCustomJson) {
+          if (selectedUploadAjId) {
+            fd.append("upload_automation_json_id", selectedUploadAjId);
+          } else if (automationJson.trim()) {
+            fd.append("automation_json", automationJson);
+          }
         }
         fd.append("self_heal", String(selfHeal));
       }
@@ -1275,10 +1285,32 @@ export default function RealUserTrafficPage() {
                 Placeholders: <code className="text-zinc-400">{"{{first}} {{email}} {{phone}} {{random.10}}"}</code>.
               </p>
               {useCustomJson && (
-                <Textarea
-                  data-testid="rut-automation-json"
-                  rows={10}
-                  placeholder={`{
+                <>
+                  {/* Uploaded automation-json template picker (reusable, never auto-deletes) */}
+                  {uploadedLibrary.filter(u => u.type === "automation_json").length > 0 && (
+                    <div className="mb-2 p-2 bg-emerald-950/30 border border-emerald-900/50 rounded">
+                      <Label className="text-emerald-300 text-xs mb-1 block">
+                        Or pick a <span className="font-semibold">saved template</span> from Uploaded Things (reusable — never deleted)
+                      </Label>
+                      <select
+                        value={selectedUploadAjId}
+                        onChange={(e) => setSelectedUploadAjId(e.target.value)}
+                        className="w-full h-8 px-2 rounded bg-zinc-800 border border-zinc-700 text-zinc-100 text-xs"
+                        data-testid="rut-upload-aj-id"
+                      >
+                        <option value="">— paste manually below —</option>
+                        {uploadedLibrary.filter(u => u.type === "automation_json").map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {u.name} · {u.item_count} steps
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  <Textarea
+                    data-testid="rut-automation-json"
+                    rows={10}
+                    placeholder={`{
   "steps": [
     {"action": "click", "selector": "a:has-text('UNLOCK NOW')", "wait_nav": true, "optional": true},
     {"action": "fill",  "selector": "input[name='first']",   "value": "{{first}}"},
@@ -1292,10 +1324,17 @@ export default function RealUserTrafficPage() {
     {"action": "click", "selector": "#submit-btn", "wait_nav": true}
   ]
 }`}
-                  value={automationJson}
-                  onChange={(e) => setAutomationJson(e.target.value)}
-                  className="bg-zinc-950 border-zinc-700 text-zinc-100 font-mono text-xs"
-                />
+                    value={automationJson}
+                    onChange={(e) => setAutomationJson(e.target.value)}
+                    disabled={!!selectedUploadAjId}
+                    className="bg-zinc-950 border-zinc-700 text-zinc-100 font-mono text-xs disabled:opacity-50"
+                  />
+                  {selectedUploadAjId && (
+                    <p className="text-xs text-emerald-400/70 mt-1">
+                      Using saved template (template is NOT consumed — you can reuse it for future campaigns)
+                    </p>
+                  )}
+                </>
               )}
               <p className="text-xs text-amber-400/70 mt-2 ml-6">
                 💡 Aap koi bhi naya offer site bhejen (URL + brief kya karna hai) — main aapke liye exact JSON bana dunga, bas yahan paste karen.

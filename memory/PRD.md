@@ -83,3 +83,23 @@ Naya feature: "Uploaded Things" page jahan user har device OS / network / proxy 
 - Country options: US, GB, CA, AU, DE, FR, IN, PK, BR, MX (with free-text state field)
 - RUT page: indigo picker boxes above Proxies + User-Agents textareas + Excel file input; textareas disable when uploaded batch selected
 - Verified end-to-end: 3 batches created → RUT job with all 3 uploaded IDs → conversion attempted → all 3 batches auto-deleted from `GET /api/uploads` after completion
+
+### Session 5 - Jan 2026 (Chromium permanent fix + Automation JSON library)
+User report: 95/100 visits failed with "Executable doesn't exist at /pw-browsers/chromium_headless_shell-1148/..." — the Session-3 startup hook was async + non-blocking, so a freshly-restarted pod + immediately-started job could race ahead of the install. Plus feature request: save/reuse automation JSON.
+
+**Bug fix — synchronous pre-job chromium ensure** (`real_user_traffic.py`):
+- New `_ensure_chromium_available()` helper with `asyncio.Lock` serialization
+- Called at the top of every `run_real_user_traffic_job()` BEFORE any visits fire
+- If binary missing: run `playwright install chromium-headless-shell` synchronously (up to 300s) while holding the lock; other concurrent jobs queue behind
+- Emits a "preflight · Verifying browser engine…" live step
+- Fails the job with a clear message if install genuinely fails
+- Result: the first job on a fresh pod waits ~30-60s during install, subsequent jobs are instant no-ops. No visit ever starts against a missing browser again.
+
+**Feature — Automation JSON reusable templates**:
+- `UPLOAD_TYPES` expanded with `automation_json`
+- New endpoint `POST /api/uploads/automation-json` (JSON-array validation, step-count)
+- `UploadedResourceResponse` schema gains `automation_json` field; GET /uploads now returns the full template body (not stripped)
+- RUT form gets `upload_automation_json_id` — when provided (and pasted json is empty) engine loads the template from uploads
+- **NOT consumed after job** — unlike other upload types, automation templates are a reusable library, verified: 1 template → 1 RUT job → template still listed in GET /uploads
+- Frontend: 4th tab "Automation JSON" in UploadedThingsPage (FileCode icon), with JSON-validation + Preview-JSON disclosure; RUT page gets an emerald picker box above the automation JSON textarea when any templates exist
+- Saved "Stimulus 750 Template" (17 steps) seeded as the reference template during verification

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import axios from "axios";
 import { toast } from "sonner";
-import { Package, Smartphone, Server, FileSpreadsheet, Trash2, Plus, RefreshCw } from "lucide-react";
+import { Package, Smartphone, Server, FileSpreadsheet, Trash2, Plus, RefreshCw, FileCode } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
@@ -50,6 +50,7 @@ const TABS = [
   { key: "user_agents", label: "User Agents / Networks", icon: Smartphone },
   { key: "proxies", label: "Proxies", icon: Server },
   { key: "data_file", label: "Data Files", icon: FileSpreadsheet },
+  { key: "automation_json", label: "Automation JSON", icon: FileCode },
 ];
 
 function TagBadge({ children, color = "indigo" }) {
@@ -90,6 +91,12 @@ export default function UploadedThingsPage() {
   const [dfName, setDfName] = useState("");
   const [dfFile, setDfFile] = useState(null);
   const [dfSaving, setDfSaving] = useState(false);
+
+  // Automation JSON form
+  const [ajName, setAjName] = useState("");
+  const [ajDesc, setAjDesc] = useState("");
+  const [ajJson, setAjJson] = useState("");
+  const [ajSaving, setAjSaving] = useState(false);
 
   const fetchUploads = useCallback(async () => {
     setLoading(true);
@@ -175,6 +182,30 @@ export default function UploadedThingsPage() {
       toast.error(e?.response?.data?.detail || "Save failed");
     } finally {
       setDfSaving(false);
+    }
+  };
+
+  const createAJ = async () => {
+    if (!ajName.trim()) return toast.error("Give this template a name");
+    if (!ajJson.trim()) return toast.error("Paste the automation JSON");
+    try { JSON.parse(ajJson); }
+    catch (e) { return toast.error("Invalid JSON: " + e.message); }
+    setAjSaving(true);
+    try {
+      const fd = new FormData();
+      fd.append("name", ajName);
+      if (ajDesc.trim()) fd.append("description", ajDesc);
+      fd.append("automation_json", ajJson);
+      await axios.post(`${API}/uploads/automation-json`, fd, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      toast.success("Automation template saved");
+      setAjName(""); setAjDesc(""); setAjJson("");
+      await fetchUploads();
+    } catch (e) {
+      toast.error(e?.response?.data?.detail || "Save failed");
+    } finally {
+      setAjSaving(false);
     }
   };
 
@@ -531,6 +562,107 @@ export default function UploadedThingsPage() {
                       {u.file_name && <TagBadge>{u.file_name}</TagBadge>}
                       <TagBadge color="emerald">{u.item_count} rows</TagBadge>
                     </div>
+                    <div className="text-xs text-zinc-500 mt-1">
+                      {new Date(u.created_at).toLocaleString()}
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => deleteUpload(u.id, u.name)}
+                    className="text-red-400 hover:text-red-300 hover:bg-red-900/20"
+                    data-testid={`ut-del-${u.id}`}
+                  >
+                    <Trash2 size={16} />
+                  </Button>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
+      {/* Automation JSON tab */}
+      {activeTab === "automation_json" && (
+        <div className="grid md:grid-cols-2 gap-6">
+          <Card className="bg-zinc-900/40 border-zinc-800">
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2 text-zinc-100">
+                <Plus size={16} /> Save an automation template
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div>
+                <Label className="text-zinc-300">Template name</Label>
+                <Input
+                  value={ajName}
+                  onChange={(e) => setAjName(e.target.value)}
+                  placeholder="e.g. Stimulus $750 Form Template"
+                  className={inputClass}
+                  data-testid="ut-aj-name"
+                />
+              </div>
+              <div>
+                <Label className="text-zinc-300">Description (optional)</Label>
+                <Input
+                  value={ajDesc}
+                  onChange={(e) => setAjDesc(e.target.value)}
+                  placeholder="e.g. apptrk.addtitans.in → stimulusassistforall → thnkspg"
+                  className={inputClass}
+                  data-testid="ut-aj-desc"
+                />
+              </div>
+              <div>
+                <Label className="text-zinc-300">Automation JSON (step-list array)</Label>
+                <Textarea
+                  value={ajJson}
+                  onChange={(e) => setAjJson(e.target.value)}
+                  placeholder={`[\n  { "action": "wait_for_load", "timeout": 30000 },\n  { "action": "fill", "selector": "input[name='first']", "value": "{{first}}" },\n  ...\n]`}
+                  className={`${inputClass} font-mono text-xs min-h-[260px]`}
+                  data-testid="ut-aj-json"
+                />
+              </div>
+              <div className="p-2 rounded bg-emerald-950/30 border border-emerald-900/50 text-xs text-emerald-300">
+                <strong>Reusable</strong> — unlike data/proxy/UA batches, automation templates are <em>not</em>
+                auto-deleted after use. Save once, pick from the RUT page every time.
+              </div>
+              <Button
+                onClick={createAJ}
+                disabled={ajSaving}
+                className="w-full"
+                style={{ backgroundColor: "var(--brand-primary)" }}
+                data-testid="ut-aj-save"
+              >
+                {ajSaving ? "Saving..." : "Save template"}
+              </Button>
+            </CardContent>
+          </Card>
+
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold text-zinc-400 uppercase tracking-wide">
+              Your saved automation templates ({filtered.length})
+            </h3>
+            {filtered.length === 0 && (
+              <div className="text-sm text-zinc-500 p-8 text-center border border-dashed border-zinc-800 rounded-lg">
+                No automation templates yet. Save your first one on the left.
+              </div>
+            )}
+            {filtered.map((u) => (
+              <Card key={u.id} className="bg-zinc-900/40 border-zinc-800" data-testid={`ut-item-${u.id}`}>
+                <CardContent className="p-4 flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-zinc-100 truncate">{u.name}</div>
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                      <TagBadge color="emerald">{u.item_count} steps</TagBadge>
+                      <TagBadge>Reusable</TagBadge>
+                    </div>
+                    {u.automation_json && (
+                      <details className="mt-2">
+                        <summary className="text-xs text-indigo-400 cursor-pointer">Preview JSON</summary>
+                        <pre className="text-xs text-zinc-400 bg-zinc-950/70 p-2 rounded mt-1 overflow-x-auto max-h-48">
+                          {u.automation_json.slice(0, 600)}{u.automation_json.length > 600 ? "…" : ""}
+                        </pre>
+                      </details>
+                    )}
                     <div className="text-xs text-zinc-500 mt-1">
                       {new Date(u.created_at).toLocaleString()}
                     </div>
