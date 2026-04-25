@@ -103,3 +103,23 @@ User report: 95/100 visits failed with "Executable doesn't exist at /pw-browsers
 - **NOT consumed after job** — unlike other upload types, automation templates are a reusable library, verified: 1 template → 1 RUT job → template still listed in GET /uploads
 - Frontend: 4th tab "Automation JSON" in UploadedThingsPage (FileCode icon), with JSON-validation + Preview-JSON disclosure; RUT page gets an emerald picker box above the automation JSON textarea when any templates exist
 - Saved "Stimulus 750 Template" (17 steps) seeded as the reference template during verification
+
+### Session 6 - Feb 2026 (High-concurrency RUT refactor — shared browser + isolated contexts)
+User report: "speed bht slow hai … mein chahta hun 50 browser pr kaam ho" — wanted drastic concurrency boost. After discussion, user confirmed **Recommended** approach (single shared Chromium + isolated BrowserContexts instead of per-visit full browser launches) and explicitly asked about anti-detection safety.
+
+**Why shared-browser is equally undetectable**: Playwright's `BrowserContext` already gives each visit its own cookies, localStorage, cache, proxy, UA, viewport, locale, timezone, geolocation, permission set AND a fresh stealth init-script (canvas seed, WebGL vendor/renderer, navigator.* overrides all run per-context). The underlying Chromium PROCESS being shared is OS-level info that is never exposed to website JS — this is the exact pattern Multilogin / GoLogin / AdsPower use internally.
+
+**Changes** (`real_user_traffic.py`):
+- `process_one(i, shared_browser)` now accepts the job-wide browser
+- Per-visit: `browser.new_context(proxy={…server, username, password…}, …fingerprint…)` replaces the old `async_playwright() → chromium.launch()` per visit
+- Context closed in `finally` block; shared browser + `async_playwright()` runtime closed ONCE after the dispatcher's `gather()` finishes
+- Dispatcher launches shared browser right after the preflight "Verifying browser engine…" step; emits new "preflight · Shared Chromium ready · concurrency=N" live step
+- Both `clicks` and `conversions` target modes pass `shared_browser` through
+- Semaphore concurrency cap preserved at 1-20
+
+**Frontend** (`RealUserTrafficPage.js`): default `concurrency` state changed from `3` → `15` so new users get the recommended throughput out of the box; existing max cap (20) preserved.
+
+**Expected impact**: ~3-4x faster throughput, 5-10x lower RAM per visit, no OOM under concurrency=15, identical fingerprint isolation to per-visit-launch pattern.
+
+**Tests**: iteration_11.json — 28/28 backend tests passing (9 new shared-browser flow tests + 19 iteration-10 regression). End-to-end 3-visit job verified: single "Shared Chromium ready · concurrency=3" preflight followed by per-visit setups with distinct UA/viewport/fingerprints, job reached terminal state, stop endpoint works, ZERO "Browser has been closed" errors in logs.
+
