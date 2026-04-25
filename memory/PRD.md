@@ -119,6 +119,24 @@ User report: 95/100 visits failed with "Executable doesn't exist at /pw-browsers
 
 **Verification**: GET `/api/real-user-traffic/jobs` ab `status=failed` + `error="All UAs filtered by allowed_os=['ios']…"` return kar raha hai.
 
+### Session 12 - Feb 2026 (Pre-warm engine button)
+**User request**: "Engine badge ke saath ek 'Pre-warm engine' button bhi rakh dein — fresh pod hote hi ek click pe chromium download trigger ho, badge yellow ho, 60s baad green."
+
+**Implementation**:
+1. **Backend** (`server.py`): New `POST /api/real-user-traffic/engine-prewarm` endpoint. Idempotent:
+   - status=ready → returns `{started: false, already_ready: true, status: 'ready', …}` without spawning anything
+   - status=installing → returns `{started: false, already_installing: true, status: 'installing', …}`
+   - status=missing/error → schedules `_ensure_chromium_available()` via FastAPI BackgroundTasks, returns `{started: true, status: 'installing', …}` immediately (no 60s wait on the request)
+   - Auth + `real_user_traffic` feature flag gated; never leaks `browser_path`.
+2. **Frontend** (`RealUserTrafficPage.js`):
+   - `EngineStatusBadge` now accepts `onPrewarm` + `prewarming` props
+   - Renders a **⚡ Pre-warm** button (Zap icon, amber styling, `data-testid="rut-engine-prewarm-btn"`) ONLY when status is `missing` or `error` (hidden when ready/installing to prevent double-clicks)
+   - `handleEnginePrewarm()` does optimistic local flip to `installing` (badge instantly turns yellow + pulse) so user gets snappy feedback before the next 5s status poll lands; calls toast on each branch (already-ready / already-installing / started)
+3. **Lock primitives** verified safe under concurrent prewarm clicks: `_CHROMIUM_INSTALL_LOCK` (asyncio.Lock) serialises installs and the in-progress flag is toggled in a try/finally so it always resets.
+
+**Tests**: iteration_15.json — 17/17 new prewarm tests + 18/18 iteration_14 regression = **35/35 passing**. Verified all four response branches (ready, missing-fires-bg-task, already-installing, error), auth+feature-flag gating, browser_path stripping, idempotency, no regression on engine-status endpoint.
+
+
 ### Session 11 - Feb 2026 (Engine Status badge on RUT page)
 **User request**: "Engine Status badge add kar do — green dot if chromium ready, yellow if installing, red if failed."
 
