@@ -3254,6 +3254,7 @@ from real_user_traffic import (
     request_job_cancel,
     get_live_steps as _rut_get_live_steps,
     RUT_JOBS as _RUT_JOBS,
+    get_engine_status as _rut_get_engine_status,
 )
 
 
@@ -3654,6 +3655,22 @@ async def rut_list_jobs(user: dict = Depends(get_current_user)):
         {"user_id": user["id"]}, {"_id": 0}
     ).sort("created_at", -1).limit(50).to_list(length=50)
     return {"jobs": persisted}
+
+
+@api_router.get("/real-user-traffic/engine-status")
+async def rut_engine_status(user: dict = Depends(get_current_user)):
+    """Return Playwright Chromium engine readiness so the RUT page can
+    show a coloured status badge. Auth required (same feature flag as
+    the rest of RUT) — output never leaks server paths to the public."""
+    check_user_feature(user, "real_user_traffic")
+    info = _rut_get_engine_status()
+    # Strip the absolute path before returning — the user only needs the
+    # status / message / revision; the on-disk path is implementation detail.
+    return {
+        "status": info.get("status"),
+        "message": info.get("message"),
+        "expected_revision": info.get("expected_revision"),
+    }
 
 
 # NOTE: /jobs/pending-candidates MUST be declared before /jobs/{job_id}

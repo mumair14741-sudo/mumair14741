@@ -39,6 +39,65 @@ if not os.environ.get("PLAYWRIGHT_BROWSERS_PATH") and os.path.isdir("/pw-browser
 # browser is present, installing it with a lock if missing. This guarantees
 # the very first visit NEVER fails with "Executable doesn't exist".
 _CHROMIUM_INSTALL_LOCK = asyncio.Lock()
+# Tracks whether an install is currently in progress so the engine-status
+# API can report "installing" instead of just "missing" while the binary
+# is being downloaded.
+_CHROMIUM_INSTALL_IN_PROGRESS = False
+
+
+def get_engine_status() -> Dict[str, Any]:
+    """Return the current state of the Playwright chromium-headless-shell
+    binary so the frontend can show a coloured "Engine Status" badge:
+        ready      → binary present at the EXACT revision Playwright wants
+        installing → install_in_progress flag is set
+        missing    → binary absent and no install in progress
+        error      → couldn't read browsers.json (unexpected)
+    """
+    browsers_root = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/pw-browsers")
+    expected: Optional[str] = None
+    try:
+        import json as _json
+        import playwright as _pw
+        bj = Path(_pw.__file__).parent / "driver" / "package" / "browsers.json"
+        if bj.exists():
+            with open(bj, "r") as fh:
+                data = _json.load(fh)
+            for entry in data.get("browsers", []):
+                if entry.get("name") == "chromium-headless-shell":
+                    expected = str(entry.get("revision") or "").strip() or None
+                    break
+    except Exception:
+        expected = None
+
+    if not expected:
+        return {
+            "status": "error",
+            "message": "Cannot read Playwright revision metadata",
+            "expected_revision": None,
+            "browser_path": None,
+        }
+
+    binary_path = Path(browsers_root) / f"chromium_headless_shell-{expected}" / "chrome-linux" / "headless_shell"
+    if binary_path.exists():
+        return {
+            "status": "ready",
+            "message": f"Chromium rev {expected} ready",
+            "expected_revision": expected,
+            "browser_path": str(binary_path),
+        }
+    if _CHROMIUM_INSTALL_IN_PROGRESS:
+        return {
+            "status": "installing",
+            "message": f"Downloading Chromium rev {expected}…",
+            "expected_revision": expected,
+            "browser_path": str(binary_path),
+        }
+    return {
+        "status": "missing",
+        "message": f"Chromium rev {expected} not installed yet",
+        "expected_revision": expected,
+        "browser_path": str(binary_path),
+    }
 
 
 async def _ensure_chromium_available() -> bool:
@@ -111,38 +170,43 @@ async def _ensure_chromium_available() -> bool:
         # finished the install while we waited).
         if _exists():
             return True
-        logger.warning(
-            f"Playwright chromium-headless-shell rev {expected or '?'} missing — "
-            f"installing now (this may take ~60s)…"
-        )
+        global _CHROMIUM_INSTALL_IN_PROGRESS
+        _CHROMIUM_INSTALL_IN_PROGRESS = True
         try:
-            proc = await asyncio.create_subprocess_exec(
-                "playwright", "install", "chromium-headless-shell",
-                env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": browsers_root},
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            logger.warning(
+                f"Playwright chromium-headless-shell rev {expected or '?'} missing — "
+                f"installing now (this may take ~60s)…"
             )
             try:
-                _out, err = await asyncio.wait_for(proc.communicate(), timeout=300)
-            except asyncio.TimeoutError:
-                try: proc.kill()
-                except Exception: pass
-                logger.error("Playwright install timed out after 5 min")
-                return False
-            if proc.returncode != 0:
-                logger.error(
-                    f"Playwright install returned {proc.returncode}: "
-                    f"{(err or b'').decode(errors='ignore')[:300]}"
+                proc = await asyncio.create_subprocess_exec(
+                    "playwright", "install", "chromium-headless-shell",
+                    env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": browsers_root},
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
                 )
+                try:
+                    _out, err = await asyncio.wait_for(proc.communicate(), timeout=300)
+                except asyncio.TimeoutError:
+                    try: proc.kill()
+                    except Exception: pass
+                    logger.error("Playwright install timed out after 5 min")
+                    return False
+                if proc.returncode != 0:
+                    logger.error(
+                        f"Playwright install returned {proc.returncode}: "
+                        f"{(err or b'').decode(errors='ignore')[:300]}"
+                    )
+                    return False
+                logger.info(
+                    f"Playwright chromium-headless-shell install: OK (rev {expected or '?'})"
+                )
+            except Exception as e:
+                logger.error(f"Playwright install failed: {e}")
                 return False
-            logger.info(
-                f"Playwright chromium-headless-shell install: OK (rev {expected or '?'})"
-            )
-        except Exception as e:
-            logger.error(f"Playwright install failed: {e}")
-            return False
-        # Final strict check — must satisfy the EXACT revision Playwright wants
-        return _exists()
+            # Final strict check — must satisfy the EXACT revision Playwright wants
+            return _exists()
+        finally:
+            _CHROMIUM_INSTALL_IN_PROGRESS = False
 
 
 import httpx

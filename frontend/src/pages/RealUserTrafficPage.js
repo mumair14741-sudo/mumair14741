@@ -83,6 +83,74 @@ function StatusBadge({ status }) {
   );
 }
 
+function EngineStatusBadge({ status }) {
+  // status = { status: "ready"|"installing"|"missing"|"error", message, expected_revision }
+  const s = status?.status || "ready";
+  const config = {
+    ready: {
+      dotClass: "bg-emerald-400 shadow-emerald-400/50",
+      pulse: false,
+      borderClass: "border-emerald-800/60 bg-emerald-950/30",
+      textClass: "text-emerald-200",
+      labelClass: "text-emerald-300",
+      label: "Engine Ready",
+    },
+    installing: {
+      dotClass: "bg-amber-400 shadow-amber-400/50",
+      pulse: true,
+      borderClass: "border-amber-800/60 bg-amber-950/30",
+      textClass: "text-amber-200",
+      labelClass: "text-amber-300",
+      label: "Installing…",
+    },
+    missing: {
+      dotClass: "bg-red-400 shadow-red-400/50",
+      pulse: false,
+      borderClass: "border-red-800/60 bg-red-950/30",
+      textClass: "text-red-200",
+      labelClass: "text-red-300",
+      label: "Engine Missing",
+    },
+    error: {
+      dotClass: "bg-red-400 shadow-red-400/50",
+      pulse: false,
+      borderClass: "border-red-800/60 bg-red-950/30",
+      textClass: "text-red-200",
+      labelClass: "text-red-300",
+      label: "Engine Error",
+    },
+  }[s] || {
+    dotClass: "bg-zinc-400",
+    pulse: false,
+    borderClass: "border-zinc-700 bg-zinc-900",
+    textClass: "text-zinc-300",
+    labelClass: "text-zinc-300",
+    label: "Engine",
+  };
+
+  return (
+    <div
+      data-testid="rut-engine-status-badge"
+      data-engine-status={s}
+      title={status?.message || config.label}
+      className={`flex-shrink-0 flex items-center gap-2 px-3 py-2 rounded-lg border ${config.borderClass} text-xs`}
+    >
+      <span className="relative flex w-2.5 h-2.5">
+        {config.pulse && (
+          <span className={`absolute inline-flex h-full w-full rounded-full opacity-60 animate-ping ${config.dotClass}`}></span>
+        )}
+        <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${config.dotClass} shadow`}></span>
+      </span>
+      <div className="flex flex-col leading-tight">
+        <span className={`font-semibold ${config.labelClass}`}>{config.label}</span>
+        <span className={`${config.textClass} text-[11px] opacity-80`}>
+          {status?.expected_revision ? `Chromium rev ${status.expected_revision}` : (status?.message || "")}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 export default function RealUserTrafficPage() {
   // Target
   const [links, setLinks] = useState([]);
@@ -160,6 +228,14 @@ export default function RealUserTrafficPage() {
   const [previewShot, setPreviewShot] = useState(null);
   const liveCursorRef = useRef(0);
   const liveTimerRef = useRef(null);
+
+  // Engine readiness — polled every 5s. Coloured badge at top of page.
+  const [engineStatus, setEngineStatus] = useState({
+    status: "ready",
+    message: "Chromium ready",
+    expected_revision: null,
+  });
+  const engineTimerRef = useRef(null);
 
   const token = () => localStorage.getItem("token");
   const authH = () => ({ Authorization: `Bearer ${token()}` });
@@ -265,11 +341,33 @@ export default function RealUserTrafficPage() {
     fetchJobs();
     fetchPendingCandidates();
     fetchUploadedLibrary();
+    fetchEngineStatus();
+    // Poll engine status every 5s — cheap (single fs check on the backend)
+    // and gives the user immediate feedback when chromium finishes
+    // installing on a fresh pod boot.
+    engineTimerRef.current = setInterval(fetchEngineStatus, 5000);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
       if (liveTimerRef.current) clearInterval(liveTimerRef.current);
+      if (engineTimerRef.current) clearInterval(engineTimerRef.current);
     };
   }, []);
+
+  const fetchEngineStatus = async () => {
+    try {
+      const r = await fetch(`${API_URL}/api/real-user-traffic/engine-status`, {
+        headers: authH(),
+      });
+      if (r.ok) {
+        const data = await r.json();
+        setEngineStatus({
+          status: data.status || "ready",
+          message: data.message || "",
+          expected_revision: data.expected_revision || null,
+        });
+      }
+    } catch (e) { /* ignore — keep last known status */ }
+  };
 
   const fetchUploadedLibrary = async () => {
     try {
@@ -569,15 +667,21 @@ export default function RealUserTrafficPage() {
   return (
     <div className="space-y-5" data-testid="real-user-traffic-page">
       {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-          <Fingerprint className="text-fuchsia-400" size={28} />
-          Real User Traffic
-        </h1>
-        <p className="text-zinc-400 text-sm mt-1">
-          Add clicks with custom IPs, user agents, countries & OS — optionally auto-fill the
-          landing-page form with Excel/CSV or Google Sheet data.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+            <Fingerprint className="text-fuchsia-400" size={28} />
+            Real User Traffic
+          </h1>
+          <p className="text-zinc-400 text-sm mt-1">
+            Add clicks with custom IPs, user agents, countries & OS — optionally auto-fill the
+            landing-page form with Excel/CSV or Google Sheet data.
+          </p>
+        </div>
+        {/* Engine Status badge — auto-polled every 5s. Lets users know
+            instantly whether the Chromium engine is ready, still
+            installing on a fresh pod, missing, or errored. */}
+        <EngineStatusBadge status={engineStatus} />
       </div>
 
       {/* ═══ Select Link ═══ */}

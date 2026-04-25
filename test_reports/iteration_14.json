@@ -1,0 +1,31 @@
+{
+  "summary": "Iteration 14 — Backend-only verification of the new GET /api/real-user-traffic/engine-status endpoint and underlying real_user_traffic.get_engine_status() helper. 18/18 pytest passed in 2.12s. Endpoint returns 200 with body {status, message, expected_revision} (does NOT leak browser_path) when authenticated; status='ready' currently because chromium-headless-shell rev 1148 is on disk at /pw-browsers/chromium_headless_shell-1148/chrome-linux/headless_shell. expected_revision='1148' matches /root/.venv/lib/python3.11/site-packages/playwright/driver/package/browsers.json (chromium-headless-shell entry). Auth gating verified: no token → 401, bad JWT → 401, fresh user without real_user_traffic feature flag → 403. The 'installing' and 'missing' code paths are exercised directly via in-process module-level calls (PLAYWRIGHT_BROWSERS_PATH redirected to /tmp/<missing>; _CHROMIUM_INSTALL_IN_PROGRESS toggled). No regression in iteration_13 endpoints: GET /api/real-user-traffic/jobs (200 + 'jobs' list), GET /api/real-user-traffic/jobs/pending-candidates (200), POST /api/real-user-traffic/jobs with empty body returns 4xx validation (no 5xx).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration14_rut_engine_status.py",
+    "/app/test_reports/pytest/iteration14.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "real_user_traffic.py::get_engine_status (lines 48-100) — clean, side-effect-free, reads playwright/driver/package/browsers.json once per call. Returns four well-defined branches: ready / installing / missing / error. The 'error' branch fires only when browsers.json cannot be read (defensive). expected_revision typing is consistently str. LGTM.",
+    "real_user_traffic.py::_CHROMIUM_INSTALL_IN_PROGRESS — module-level bool toggled inside _ensure_chromium_available()'s lock. Because asyncio.Lock serialises installs, the flag is race-free for read by the API endpoint. Note: a process-restart while the flag is True would lose state, but on restart the binary is either present (=> ready) or absent + no install running (=> missing), so the badge will self-heal once the install kicks in. Acceptable.",
+    "server.py::rut_engine_status (lines 3660-3673) — correctly strips 'browser_path' before returning to client (no /pw-browsers/... leak). Auth via get_current_user + check_user_feature('real_user_traffic'). Both gates verified at runtime. LGTM.",
+    "ENHANCEMENT (non-blocking) — Frontend polls every 5s; under load this is ~17k calls/user/day. Endpoint is cheap (one JSON read + one stat call) but consider adding a 1-2s in-process cache or returning a Cache-Control header to encourage browser-side throttling. Not required for MVP.",
+    "ENHANCEMENT (non-blocking) — get_engine_status() reads browsers.json on every call; consider memoising the parsed revision at module import time since it's static for a given Playwright install. Cosmetic.",
+    "OBSERVATION — The 'installing' status is purely advisory: the flag is set ONLY when _ensure_chromium_available() runs, which is invoked at job-launch time. So if the binary is wiped from disk but no job has been started since, the endpoint will report 'missing' (correct) until a job triggers the install. The badge UX therefore won't flicker prematurely — good design."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration14_rut_engine_status.py (new — 18 tests across 6 classes: auth sanity, endpoint happy-path, auth-gating, feature-flag gating, helper unit-tests for installing/missing branches, and regression on existing RUT endpoints)"
+  ],
+  "success_rate": {"backend": "100% (18/18 in 2.12s)", "frontend": "n/a — backend-only per request"},
+  "test_credentials": "Admin: admin@trackmaster.local / admin123 via POST /api/admin/login",
+  "seed_data_creation": "One throwaway regular user (TEST_rut_engine_<uuid>@example.com) registered to verify feature-flag gating returns 403. No other state changes.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Re-run: cd /app/backend && python -m pytest tests/test_iteration14_rut_engine_status.py -v --tb=short --junitxml=/app/test_reports/pytest/iteration14.xml. Requires REACT_APP_BACKEND_URL (read from /app/frontend/.env) and PLAYWRIGHT_BROWSERS_PATH defaulting to /pw-browsers. Admin login is /api/admin/login (regular /auth/login returns 401 for env-seeded admin — see iteration_13 minor issue, still applicable). The 'installing' / 'missing' branches are tested in-process via monkeypatch on PLAYWRIGHT_BROWSERS_PATH + _CHROMIUM_INSTALL_IN_PROGRESS — no real chromium reinstall happens, safe to re-run repeatedly.",
+  "rca of the issue": "N/A — feature-addition iteration, not a bug fix. Endpoint behaves exactly as specified; status='ready' / expected_revision='1148' as confirmed by main agent's smoke curl."
+}
