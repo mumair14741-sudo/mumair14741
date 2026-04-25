@@ -104,6 +104,22 @@ User report: 95/100 visits failed with "Executable doesn't exist at /pw-browsers
 - Frontend: 4th tab "Automation JSON" in UploadedThingsPage (FileCode icon), with JSON-validation + Preview-JSON disclosure; RUT page gets an emerald picker box above the automation JSON textarea when any templates exist
 - Saved "Stimulus 750 Template" (17 steps) seeded as the reference template during verification
 
+### Session 7 - Feb 2026 (Selective consume of uploaded batches — bug fix)
+**User report**: "1000 proxies upload kien, kuch use hoin, lekin pori file delete ho gayi — same issue UAs aur data file pe bhi."
+
+**Root cause**: `_consume_uploads()` in `server.py` was doing `delete_many` on the entire upload doc list — wiping the whole batch even if only a few items were used.
+
+**Fix**:
+- `real_user_traffic.py::process_one()` now adds `proxy["raw"]` to `used_proxy_set` and `ua` to `used_ua_set` on EVERY visit (not just when `no_repeated_proxy=true`).
+- Job end persists both as `used_proxy_raws` + `used_ua_strings` lists in the `real_user_traffic_jobs` DB record.
+- `_consume_uploads()` rewritten to accept `used_proxy_raws`, `used_ua_strings`, `pending_leads_path` kwargs. Per upload type:
+  - **proxies**: `items = [it for it in items if it.strip() not in used_proxy_set]` → `update_one` with the remaining items; only `delete_one` if `items[]` becomes empty.
+  - **user_agents**: same — selective filter, batch survives unless fully consumed.
+  - **data_file**: `shutil.copyfile(pending_leads.xlsx → current_fp)` so the saved upload now contains only rows that were NOT submitted; deletes batch only if `pending_rows == 0` or pending file is missing.
+  - **automation_json**: never reaches the hook (already excluded at job creation — reusable library).
+
+**Tests**: iteration_12.json — 11/11 backend tests passing (100%). End-to-end: 4 uploads (5 proxies, 5 UAs, 5-row XLSX, automation JSON) → 2-visit RUT job → terminal state → all 4 batches survived in DB with reduced items[] (proving selective prune works). Automation JSON untouched as expected.
+
 ### Session 6 - Feb 2026 (High-concurrency RUT refactor — shared browser + isolated contexts)
 User report: "speed bht slow hai … mein chahta hun 50 browser pr kaam ho" — wanted drastic concurrency boost. After discussion, user confirmed **Recommended** approach (single shared Chromium + isolated BrowserContexts instead of per-visit full browser launches) and explicitly asked about anti-detection safety.
 
