@@ -117,6 +117,11 @@ export default function RealUserTrafficPage() {
   const [skipVpn, setSkipVpn] = useState(true);
   const [followRedirect, setFollowRedirect] = useState(false);
   const [noRepeatedProxy, setNoRepeatedProxy] = useState(false);
+  // When ON, every RUT visit is forced to route through the tracker URL
+  // (/api/t/<short_code>) — server-side click counter, duplicate IP check
+  // and link-stats all increment naturally. OFF (default) keeps the
+  // preview-pod auto-bypass so residential proxies don't hit Cloudflare 403.
+  const [forceTrackerUrl, setForceTrackerUrl] = useState(false);
 
   // Form-fill toggle
   const [formFillEnabled, setFormFillEnabled] = useState(false);
@@ -397,6 +402,7 @@ export default function RealUserTrafficPage() {
       fd.append("skip_vpn", String(skipVpn));
       fd.append("follow_redirect", String(followRedirect));
       fd.append("no_repeated_proxy", String(noRepeatedProxy));
+      fd.append("force_tracker_url", String(forceTrackerUrl));
 
       fd.append("form_fill_enabled", String(formFillEnabled));
       if (formFillEnabled) {
@@ -954,6 +960,14 @@ export default function RealUserTrafficPage() {
             </CheckRow>
             <CheckRow testId="rut-no-repeated-proxy" checked={noRepeatedProxy} onChange={setNoRepeatedProxy}>
               <span className="text-zinc-300">♻️ No repeated proxy (one use per line)</span>
+            </CheckRow>
+            <CheckRow testId="rut-force-tracker-url" checked={forceTrackerUrl} onChange={setForceTrackerUrl}>
+              <span className="text-zinc-300">
+                🎯 Strict tracker URL
+                <span className="text-zinc-500 text-xs ml-2">
+                  (force every visit through /api/t/&lt;short_code&gt; — best for strict duplicate-IP &amp; click counting; may 403 from some residential proxies on preview pods)
+                </span>
+              </span>
             </CheckRow>
           </div>
         </CardContent>

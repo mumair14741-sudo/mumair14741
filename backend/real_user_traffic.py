@@ -2188,9 +2188,17 @@ async def _log_click_for_link(entry: Dict[str, Any], job_info: Dict[str, Any], m
     if not link_id or not owner_id or main_db is None:
         return
     try:
-        # Access the per-user DB on the same client
+        # Access the per-user DB on the same client. IMPORTANT: Must match
+        # server.py::get_user_db() exactly — that helper uses a 20-char
+        # truncated, underscore-normalised key:
+        #     f"trackmaster_user_{user_id.replace('-', '_')[:20]}"
+        # If we use the raw owner_id (with hyphens) here, the click docs go
+        # into a SEPARATE database and the dashboard / Clicks page reads
+        # from the truncated DB and sees ZERO clicks — exactly the bug
+        # users have reported ("tracker link use kia pr click count nahi hoa").
         client = main_db.client
-        user_db = client[f"trackmaster_user_{owner_id}"]
+        db_name = f"trackmaster_user_{owner_id.replace('-', '_')[:20]}"
+        user_db = client[db_name]
 
         exit_ip = (entry.get("exit_ip") or "").strip()
         is_vpn = bool(entry.get("status") == "skipped_vpn" or entry.get("is_vpn"))

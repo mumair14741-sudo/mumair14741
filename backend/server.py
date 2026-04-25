@@ -3306,7 +3306,7 @@ def _is_emergent_preview_host(url: str) -> bool:
         return False
 
 
-def _rut_build_target_url(request: Request, link: dict, explicit_target: Optional[str]) -> str:
+def _rut_build_target_url(request: Request, link: dict, explicit_target: Optional[str], force_tracker: bool = False) -> str:
     sc = link["short_code"]
     offer = (link.get("offer_url") or link.get("destination_url") or "").strip()
     offer_is_public = bool(
@@ -3324,7 +3324,9 @@ def _rut_build_target_url(request: Request, link: dict, explicit_target: Optiona
             # Local host OR Emergent preview host — unreachable/blocked
             # through a public residential proxy; auto-swap to the link's
             # offer_url so the browser can actually reach the landing page.
-            if _is_local_or_private_host(tu) or _is_emergent_preview_host(tu):
+            # UNLESS force_tracker=True → keep the tracker URL (user
+            # explicitly wants strict flow through /api/t/).
+            if not force_tracker and (_is_local_or_private_host(tu) or _is_emergent_preview_host(tu)):
                 if offer_is_public:
                     return offer
             return tu
@@ -3333,7 +3335,7 @@ def _rut_build_target_url(request: Request, link: dict, explicit_target: Optiona
     public_base = os.environ.get("PUBLIC_BASE_URL") or os.environ.get("REACT_APP_BACKEND_URL") or ""
     if public_base and public_base.startswith("http"):
         candidate = f"{public_base.rstrip('/')}/api/t/{sc}"
-        if _is_local_or_private_host(candidate) or _is_emergent_preview_host(candidate):
+        if not force_tracker and (_is_local_or_private_host(candidate) or _is_emergent_preview_host(candidate)):
             if offer_is_public:
                 return offer
         return candidate
@@ -3344,7 +3346,7 @@ def _rut_build_target_url(request: Request, link: dict, explicit_target: Optiona
             scheme = fwd_proto.split(",")[0].strip()
             host = fwd_host.split(",")[0].strip()
             candidate = f"{scheme}://{host}/api/t/{sc}"
-            if _is_local_or_private_host(candidate) or _is_emergent_preview_host(candidate):
+            if not force_tracker and (_is_local_or_private_host(candidate) or _is_emergent_preview_host(candidate)):
                 if offer_is_public:
                     return offer
             return candidate
@@ -3406,6 +3408,11 @@ async def rut_create_job(
     # Automation-JSON template — picked from the reusable library; NOT
     # auto-deleted so the same template can be used across many campaigns.
     upload_automation_json_id: Optional[str] = Form(None),
+    # Strict tracker-URL flow — when True, every visit MUST go through
+    # `/api/t/<short_code>` on this preview pod (no auto-bypass to the
+    # offer URL). Use when you want server-side click logging + duplicate
+    # IP check to happen at the tracker endpoint itself.
+    force_tracker_url: bool = Form(False),
     user: dict = Depends(get_current_user_with_fresh_data),
 ):
     """Kick off a real-user-traffic run. Combines real-traffic + optional form-fill."""
@@ -3418,7 +3425,7 @@ async def rut_create_job(
     link = await db.links.find_one({"id": link_id, "user_id": user["id"]}, {"_id": 0})
     if not link:
         raise HTTPException(status_code=404, detail="Link not found")
-    target = _rut_build_target_url(request, link, target_url)
+    target = _rut_build_target_url(request, link, target_url, force_tracker=force_tracker_url)
 
     # 2. Validate numbers
     if total_clicks < 1 or total_clicks > 100000:

@@ -1,0 +1,35 @@
+{
+  "summary": "Iteration 13 — Verified (a) DB-name mismatch fix for RUT click logging and (b) new force_tracker_url flag on POST /api/real-user-traffic/jobs. 11/11 pytest passed (7s). Per-user DB trackmaster_user_6e0e38a5_08f3_4403_9 now holds 631 clicks (all with source='real_user_traffic' and referrer_source='rut'); no orphan trackmaster_user_<full-uuid> DB still holds unmigrated clicks. GET /api/dashboard/stats for admin@trackmaster.local returns total_clicks=631 (previously 0 — BUG FIXED). GET /api/clicks returns RUT-sourced rows and excludes Mongo _id. POST /api/real-user-traffic/jobs wiring for force_tracker_url is correct: force_tracker_url=true → returned target_url contains '/api/t/<short_code>' on the preview-pod host (no auto-swap); force_tracker_url=false (default) → target_url auto-swaps to the offer host 'apptrk.addtitans.in' (legacy bypass preserved). Tiny RUT job confirms dashboard counts are monotonically non-decreasing post-run (routing into the correct per-user DB).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/auth/login", "issue": "Admin login MUST go through /api/admin/login with password 'admin123'; /api/auth/login returns 401 Invalid credentials for the same admin user. The admin is seeded WITHOUT a password_hash in main_db.users (only admin creds in .env), so the regular auth path can never authenticate them. Not a regression, but it contradicts /app/memory/test_credentials.md which says 'Login via Admin Login link' — testers who follow the credentials file via /api/auth/login will fail. Either (a) update test_credentials.md to explicitly list /api/admin/login, or (b) make /api/auth/login transparently fall through to the admin-env credentials on 401."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration13_rut_click_logging_and_force_tracker.py",
+    "/app/test_reports/pytest/iteration13.xml"
+  ],
+  "action_items": [
+    "(MINOR/DOCS) Update /app/memory/test_credentials.md — admin login uses POST /api/admin/login (NOT /api/auth/login). Currently tests and automation hitting /auth/login get 401. Optional: add a fallback in /api/auth/login that accepts env-seeded admin creds when main_db.users has no password_hash."
+  ],
+  "critical_code_review_comments": [
+    "server.py::_rut_build_target_url (line ~3309) — the force_tracker kwarg correctly short-circuits the three preview/local-host auto-swap branches. No dead code, no fall-through. 'explicit_target starts with http/https' branch (line 3323–3332) respects the flag. The bare-host and PUBLIC_BASE_URL branches also respect it. LGTM.",
+    "real_user_traffic.py::_log_click_for_link (line ~2200) — db_name now uses `owner_id.replace('-','_')[:20]`, matching server.py::get_user_db() exactly (line 92). The inline comment explicitly warns future maintainers about the truncation, which is a great bug-prevention note. Strong fix.",
+    "The 631 clicks have been migrated into the correct per-user DB (verified via direct pymongo peek). The pre-fix orphan DB (trackmaster_user_<full-uuid>) is either absent or empty — confirmed by test_no_orphaned_full_uuid_db.",
+    "server.py::rut_create_job — force_tracker_url Form(False) param (line 3415) is correctly forwarded to _rut_build_target_url on line 3428. Response body (line 3630-3647) includes target_url so the frontend / tests can verify the selected URL. Clean plumbing.",
+    "ENHANCEMENT — /api/real-user-traffic/jobs currently logs a click (via _log_click_for_link) AFTER the browser visit regardless of whether force_tracker_url is on. When force_tracker_url=True and the browser actually hits /api/t/<sc>, the tracker endpoint itself will ALSO create a click document on redirect. Risk: DOUBLE-COUNTED clicks under strict-tracker flow. Worth auditing /api/t/ + RUT post-visit path to ensure they don't both write for the same visit. (Not validated in this iteration — outside request scope.)",
+    "ENHANCEMENT — The admin-login path /api/admin/login is a separate code path and does not issue the same 'user_with_fresh_data' dict. Worth collapsing the two login endpoints into one to avoid token-shape divergence (admin response has no 'user' object, regular has 'user' object). Minor UX/API consistency ask."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration13_rut_click_logging_and_force_tracker.py (new — 11 tests: 2 auth sanity, 3 DB-name verification, 3 dashboard/clicks API, 2 force_tracker_url wiring, 1 end-to-end click-log smoke)"
+  ],
+  "success_rate": {"backend": "100% (11/11 in 7s)", "frontend": "n/a — backend-only review per request"},
+  "test_credentials": "Admin: admin@trackmaster.local / admin123 via POST /api/admin/login (NOT /api/auth/login — see minor issue).",
+  "seed_data_creation": "None. Used existing admin user + existing link short_code=2735ad44 (id=baa47816-ccea-4b6b-98d1-c8fbfa6bd18b). Two tiny RUT jobs with dummy proxies were created for force-tracker wiring checks and then stopped; they do not materially alter click counts (proxies fail fast).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Re-run: cd /app/backend && python -m pytest tests/test_iteration13_rut_click_logging_and_force_tracker.py -v --tb=short. Requires MONGO_URL + REACT_APP_BACKEND_URL env (read from /app/backend/.env + /app/frontend/.env). Admin login is /api/admin/login — IMPORTANT, the regular /api/auth/login returns 401 for the env-seeded admin. The 3 DB-peek tests hit mongodb://localhost:27017 directly to verify click count + source fields — they pass as of this iteration (631 clicks). force_tracker_url is wired on POST /api/real-user-traffic/jobs; the 2 wiring tests create + immediately stop a RUT job (no real proxy traffic needed).",
+  "rca of the issue": "ORIGINAL USER BUG (Roman Urdu: 'tracker ka link use kia pr click koi b count ni hoa'): server.py::get_user_db() truncates user_id to 20 chars when building the per-user DB name, but real_user_traffic.py::_log_click_for_link was using the full user_id → writes landed in a DIFFERENT (orphan) DB from what /api/dashboard/stats and /api/clicks read. Result: 631 clicks invisible to the dashboard. FIX applied in /app/backend/real_user_traffic.py line 2200 — db_name now computed with `owner_id.replace('-','_')[:20]`, exactly matching server.py line 92. Migration of the 631 orphan clicks into the correct DB was done out-of-band during the fix. Verified in this iteration by (a) direct pymongo counts, (b) GET /api/dashboard/stats = 631, (c) GET /api/clicks returns source='real_user_traffic' rows, (d) no orphan DB holds residual clicks. force_tracker_url new flag is wired end-to-end (tested both true and false cases via the returned target_url)."
+}
