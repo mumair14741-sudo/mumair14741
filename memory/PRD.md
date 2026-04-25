@@ -104,6 +104,21 @@ User report: 95/100 visits failed with "Executable doesn't exist at /pw-browsers
 - Frontend: 4th tab "Automation JSON" in UploadedThingsPage (FileCode icon), with JSON-validation + Preview-JSON disclosure; RUT page gets an emerald picker box above the automation JSON textarea when any templates exist
 - Saved "Stimulus 750 Template" (17 steps) seeded as the reference template during verification
 
+### Session 8 - Feb 2026 (Silent job-failure visibility fix)
+**User report**: "abi test kia pr job start ni hoi failed a raha hai" — uploaded data run ki, job stuck "queued" tha aur Live Run me bas red "failed" badge tha bina koi error message ke.
+
+**Root cause**: 
+1. `_finalise()` sirf in-memory `RUT_JOBS` dict update karta tha, MongoDB me persist NAHI karta tha. Result: Past Jobs row "queued" pe stuck reh jata aur error message DB me kabhi save nahi hota.
+2. Live Run panel me `activeJob.error` field kahin display nahi hota tha — sirf status badge dikhta tha.
+3. Actual failure: User ne Android UAs upload kien lekin "Allowed OS" chip me "iOS" select kar diya → engine ne `allowed_os=['ios']` filter ke against sab UAs filter out kar diye → "All UAs filtered" error throw kiya jo dikha hi nahi.
+
+**Fix**:
+- `real_user_traffic.py`: New `_finalise_and_persist(db, job_id, status, error)` async helper jo `_finalise()` ke baad turant `_persist()` bhi call karta hai. Sab early-fail call sites (chromium install fail, no proxies, no UAs, allowed_os filter, browser launch fail) ab is helper ko use karte hain — DB hamesha terminal state aur error reflect karta hai.
+- `RealUserTrafficPage.js`: Live Run panel ke top pe red `AlertTriangle` banner with `data-testid="rut-job-error-banner"` jo `activeJob.status === "failed" && activeJob.error` hone par dikhta hai. User ko ab failure ka exact reason saaf nazar ata hai.
+- Stuck `9cd1d6f1` job ka DB record manually patch karke `status=failed` + clear error message set kiya gaya so user agle refresh pe pura reason dekh sakein.
+
+**Verification**: GET `/api/real-user-traffic/jobs` ab `status=failed` + `error="All UAs filtered by allowed_os=['ios']…"` return kar raha hai.
+
 ### Session 7 - Feb 2026 (Selective consume of uploaded batches — bug fix)
 **User report**: "1000 proxies upload kien, kuch use hoin, lekin pori file delete ho gayi — same issue UAs aur data file pe bhi."
 

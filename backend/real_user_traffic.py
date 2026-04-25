@@ -795,7 +795,7 @@ async def run_real_user_traffic_job(
         pass
     ok = await _ensure_chromium_available()
     if not ok:
-        _finalise(job_id, "failed",
+        await _finalise_and_persist(db, job_id, "failed",
                   "Playwright chromium-headless-shell could not be installed. "
                   "Please contact support or retry — the install will be attempted again on the next job.")
         return
@@ -806,12 +806,12 @@ async def run_real_user_traffic_job(
         if p:
             parsed_proxies.append(p)
     if not parsed_proxies:
-        _finalise(job_id, "failed", "No valid proxies after parsing")
+        await _finalise_and_persist(db, job_id, "failed", "No valid proxies after parsing")
         return
 
     uas = [u.strip() for u in user_agents if u and u.strip()]
     if not uas:
-        _finalise(job_id, "failed", "No user agents provided")
+        await _finalise_and_persist(db, job_id, "failed", "No user agents provided")
         return
 
     # Pre-filter UAs by allowed_os
@@ -820,9 +820,11 @@ async def run_real_user_traffic_job(
         uas_ok = [u for u in uas if _os_key_from_ua(u) in allowed_os_set]
         if not uas_ok:
             sample_detect = [(u[:60], _os_key_from_ua(u)) for u in uas[:3]]
-            _finalise(job_id, "failed",
-                      f"All UAs filtered by allowed_os={sorted(allowed_os_set)}. "
-                      f"Detected: {sample_detect}")
+            await _finalise_and_persist(job_id=job_id, db=db, status="failed",
+                      error=(
+                          f"All UAs filtered by allowed_os={sorted(allowed_os_set)}. "
+                          f"Detected: {sample_detect}"
+                      ))
             return
     else:
         uas_ok = uas
@@ -1545,7 +1547,7 @@ async def run_real_user_traffic_job(
             await pw_cm.__aexit__(type(e), e, None)
         except Exception:
             pass
-        _finalise(job_id, "failed",
+        await _finalise_and_persist(db, job_id, "failed",
                   f"Playwright browser launch failed: {type(e).__name__}: {str(e)[:160]}")
         return
     push_live_step(job_id, 0, "preflight", "ok",
@@ -2450,6 +2452,18 @@ def _finalise(job_id: str, status: str, error: str = ""):
     if error:
         j["error"] = error
     j["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+
+async def _finalise_and_persist(db, job_id: str, status: str, error: str = ""):
+    """Same as _finalise but ALSO writes the failed/stopped state to MongoDB
+    so the Past Jobs row + REST endpoint reflect the error message instead
+    of leaving the job stuck on 'queued' forever."""
+    _finalise(job_id, status, error)
+    if db is not None:
+        try:
+            await _persist(db, job_id)
+        except Exception as e:
+            logger.debug(f"_finalise_and_persist persist failed: {e}")
 
 
 async def _persist(db, job_id: str):

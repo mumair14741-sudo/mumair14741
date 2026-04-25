@@ -1392,6 +1392,25 @@ export default function RealUserTrafficPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {/* Show error banner when job failed — without this, users only
+                see a "failed" badge with no detail (e.g. "All UAs filtered
+                by allowed_os=[ios]" was completely hidden before). */}
+            {activeJob.status === "failed" && activeJob.error && (
+              <div
+                data-testid="rut-job-error-banner"
+                className="mb-4 rounded-lg border border-red-900/60 bg-red-950/40 px-4 py-3 flex items-start gap-3"
+              >
+                <AlertTriangle className="w-5 h-5 text-red-400 mt-0.5 flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-red-300 text-sm font-semibold mb-1">
+                    Job failed
+                  </div>
+                  <div className="text-red-200 text-sm break-words">
+                    {activeJob.error}
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-2 md:grid-cols-8 gap-3 mb-4">
               <Stat label="Total" value={activeJob.total ?? 0} />
               <Stat label="Processed" value={activeJob.processed ?? 0} />
