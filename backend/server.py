@@ -9855,9 +9855,14 @@ async def redirect_link(short_code: str, request: Request, sub1: str = "", sub2:
     allowed_os = link.get("allowed_os", [])
     if allowed_os:
         visitor_os = device_info["os_name"]
-        # print(f"DEBUG: Checking OS restriction - Visitor OS: {visitor_os}, Allowed OS: {allowed_os}")
-        
-        if visitor_os not in allowed_os:
+        # Case-insensitive comparison — `device_info["os_name"]` returns
+        # title-case ("Android", "Windows", "iOS", "macOS") while the link
+        # config historically stores lowercase ("android", "windows", "ios").
+        # Without this fold, EVERY visit was wrongly blocked with "Device
+        # Restricted" even when the OS matched (the user reported 0 conversions
+        # despite 100 Android proxies hitting an Android-allowed link).
+        allowed_os_norm = [str(s).strip().lower() for s in allowed_os]
+        if (visitor_os or "").strip().lower() not in allowed_os_norm:
             allowed_display = ", ".join(allowed_os)
             return Response(
                 content=f"""<!DOCTYPE html>

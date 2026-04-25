@@ -49,24 +49,47 @@ RESULTS_ROOT.mkdir(parents=True, exist_ok=True)
 JOBS: Dict[str, Dict[str, Any]] = {}
 
 # ─────── Captcha detection heuristics ──────────────────────────────
-CAPTCHA_SIGNATURES = [
-    "recaptcha",
-    "g-recaptcha",
-    "hcaptcha",
-    "h-captcha",
-    "turnstile",
-    "cloudflare/turnstile",
-    "challenge-platform",
-    "captcha",
+# We look for ACTUAL challenge widgets / iframes that block interaction —
+# NOT any random script tag. Cloudflare's preview-pod / proxy edge often
+# injects `<script>…/cdn-cgi/challenge-platform/scripts/jsd/main.js…</script>`
+# (passive bot analytics, not a real challenge) into every response —
+# matching that bare string was producing 100% false positives and made
+# Real-User-Traffic mark every preview-pod tracker visit as
+# `skipped_captcha`. The patterns below match only genuine, visible
+# challenge surfaces:
+#   • iframe srcs on the canonical challenge hosts (challenges.cloudflare.com
+#     / google reCAPTCHA / hCaptcha)
+#   • specific widget classes / IDs that imply a rendered challenge
+#   • the literal Turnstile widget tag.
+CAPTCHA_PATTERNS = [
+    re.compile(r'src=["\'][^"\']*challenges\.cloudflare\.com', re.I),
+    re.compile(r'src=["\'][^"\']*google\.com/recaptcha', re.I),
+    re.compile(r'src=["\'][^"\']*recaptcha\.net', re.I),
+    re.compile(r'src=["\'][^"\']*hcaptcha\.com', re.I),
+    re.compile(r'<div[^>]+class=["\'][^"\']*g-recaptcha\b', re.I),
+    re.compile(r'<div[^>]+class=["\'][^"\']*h-captcha\b', re.I),
+    re.compile(r'<div[^>]+class=["\'][^"\']*cf-turnstile\b', re.I),
+    re.compile(r'<iframe[^>]+title=["\'][^"\']*recaptcha', re.I),
+    re.compile(r'<iframe[^>]+title=["\'][^"\']*hcaptcha', re.I),
+    # Real Cloudflare interstitial pages — the "Just a moment…" page —
+    # have BOTH the `__cf_chl_` query-arg JS AND the cf-mitigated script;
+    # the bare "/cdn-cgi/challenge-platform/scripts/jsd/main.js" injection
+    # used by preview pods does NOT have these.
+    re.compile(r'__cf_chl_jschl_tk__|__cf_chl_managed_tk__', re.I),
+    re.compile(r'cf-mitigated|cf-error-details', re.I),
 ]
 
+
 async def _page_has_captcha(page: Page) -> bool:
-    """Return True if any common captcha widget is present on page."""
+    """Return True only when a GENUINE captcha / interactive challenge
+    widget is visible on the page. Returns False for Cloudflare's passive
+    /cdn-cgi/challenge-platform/scripts/jsd/main.js bot analytics
+    injection which preview-pod / proxy edges add to every response."""
     try:
-        html = (await page.content()).lower()
+        html = await page.content()
     except Exception:
         return False
-    return any(sig in html for sig in CAPTCHA_SIGNATURES)
+    return any(p.search(html) for p in CAPTCHA_PATTERNS)
 
 
 # ─────── Input data loading ────────────────────────────────────────
