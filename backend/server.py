@@ -3627,6 +3627,14 @@ async def rut_create_job(
         link_id=link.get("id") if link else None,
         link_owner_id=(link or {}).get("user_id") or user["id"],
         link_short_code=(link or {}).get("short_code"),
+        # User-id + per-batch upload IDs so the engine can delete each
+        # proxy / UA / data-row from the saved batch IMMEDIATELY after it
+        # is consumed (instead of pruning at job-end). User explicitly
+        # asked: "ek line use hoe wo sath he delete ho jay".
+        engine_user_id=user["id"],
+        upload_proxy_id=(upload_proxy_id or None),
+        upload_ua_id=(upload_ua_id or None),
+        upload_data_file_id=(upload_data_file_id or None),
     )
     return {
         "job_id": job_id,

@@ -888,6 +888,16 @@ async def run_real_user_traffic_job(
     link_id: Optional[str] = None,
     link_owner_id: Optional[str] = None,
     link_short_code: Optional[str] = None,
+    # Per-use immediate removal of consumed items from the saved
+    # "Uploaded Things" batches. As soon as a proxy / UA is picked for a
+    # visit (or a row index is successfully submitted), it is pulled
+    # from the saved batch in MongoDB / overwritten in the on-disk XLSX.
+    # User explicitly asked for this real-time behaviour rather than a
+    # batched end-of-job consume.
+    engine_user_id: Optional[str] = None,
+    upload_proxy_id: Optional[str] = None,
+    upload_ua_id: Optional[str] = None,
+    upload_data_file_id: Optional[str] = None,
 ):
     """
     Main orchestrator. Emits progress into RUT_JOBS[job_id].
@@ -1011,6 +1021,157 @@ async def run_real_user_traffic_job(
     cancel_event = asyncio.Event()
     RUT_JOBS[job_id]["_cancel_event"] = cancel_event
 
+    # ── Per-use immediate deletion (real-time pruning) ──────────────
+    # User asked: "ek line use hoe wo sath he delete ho jay" — so as soon
+    # as a proxy / UA / row gets consumed in a visit we $pull it from the
+    # saved upload batch (or rewrite the on-disk XLSX). Fire-and-forget
+    # tasks so the visit isn't blocked by Mongo round-trips.
+    _live_proxy_pulled: set = set()  # avoid duplicate $pulls
+    _live_ua_pulled: set = set()
+    _data_file_lock = asyncio.Lock()  # serialise XLSX rewrites
+    user_db_truncated = (engine_user_id or "").replace("-", "_")[:20]
+
+    async def _live_remove_proxy(raw: str):
+        if not (engine_user_id and upload_proxy_id and db is not None and raw):
+            return
+        if raw in _live_proxy_pulled:
+            return
+        _live_proxy_pulled.add(raw)
+        try:
+            client = db.client
+            user_db = client[f"trackmaster_user_{user_db_truncated}"]
+            res = await user_db["uploaded_resources"].update_one(
+                {"id": upload_proxy_id, "user_id": engine_user_id, "type": "proxies"},
+                {
+                    "$pull": {"items": raw},
+                    "$set": {"updated_at": datetime.now(timezone.utc).isoformat()},
+                    "$inc": {"consumed_count": 1, "item_count": -1},
+                },
+            )
+            # If the batch is now empty, delete it entirely
+            if res.modified_count:
+                doc = await user_db["uploaded_resources"].find_one(
+                    {"id": upload_proxy_id, "user_id": engine_user_id},
+                    {"_id": 0, "items": 1},
+                )
+                if doc and not (doc.get("items") or []):
+                    await user_db["uploaded_resources"].delete_one(
+                        {"id": upload_proxy_id, "user_id": engine_user_id}
+                    )
+        except Exception as e:
+            logger.debug(f"_live_remove_proxy failed: {e}")
+
+    async def _live_remove_ua(ua: str):
+        if not (engine_user_id and upload_ua_id and db is not None and ua):
+            return
+        if ua in _live_ua_pulled:
+            return
+        _live_ua_pulled.add(ua)
+        try:
+            client = db.client
+            user_db = client[f"trackmaster_user_{user_db_truncated}"]
+            res = await user_db["uploaded_resources"].update_one(
+                {"id": upload_ua_id, "user_id": engine_user_id, "type": "user_agents"},
+                {
+                    "$pull": {"items": ua},
+                    "$set": {"updated_at": datetime.now(timezone.utc).isoformat()},
+                    "$inc": {"consumed_count": 1, "item_count": -1},
+                },
+            )
+            if res.modified_count:
+                doc = await user_db["uploaded_resources"].find_one(
+                    {"id": upload_ua_id, "user_id": engine_user_id},
+                    {"_id": 0, "items": 1},
+                )
+                if doc and not (doc.get("items") or []):
+                    await user_db["uploaded_resources"].delete_one(
+                        {"id": upload_ua_id, "user_id": engine_user_id}
+                    )
+        except Exception as e:
+            logger.debug(f"_live_remove_ua failed: {e}")
+
+    async def _live_remove_data_row(row_idx: int):
+        """Rewrite the saved data-file XLSX with the consumed/invalid row
+        removed. Lock-serialised so concurrent writes don't corrupt the
+        file. The on-disk path is read fresh from the upload doc each
+        time so a previous flush is always reflected."""
+        if not (engine_user_id and upload_data_file_id and db is not None):
+            return
+        async with _data_file_lock:
+            try:
+                client = db.client
+                user_db = client[f"trackmaster_user_{user_db_truncated}"]
+                doc = await user_db["uploaded_resources"].find_one(
+                    {"id": upload_data_file_id, "user_id": engine_user_id, "type": "data_file"},
+                    {"_id": 0, "file_path": 1, "items": 1},
+                )
+                if not doc:
+                    return
+                fp = doc.get("file_path") or ""
+                if not fp or not Path(fp).exists():
+                    return
+                # Load, drop the row, save back. We use openpyxl directly
+                # to keep things fast (no pandas roundtrip for 1 row).
+                import openpyxl
+                wb = openpyxl.load_workbook(fp)
+                ws = wb.active
+                # row_idx is 0-based against the original-data rows; the
+                # XLSX has a header row at row 1, so the actual sheet row
+                # is row_idx + 2. After previous deletions the sheet has
+                # fewer rows than the original — we therefore work off
+                # row VALUES, not indices: scan all data rows and find
+                # the one whose original_row_index column matches.
+                # Simpler approach: maintain a hidden "_orig_idx" column
+                # added on first write so subsequent deletions work
+                # against a stable identifier.
+                header = [c.value for c in ws[1]] if ws.max_row >= 1 else []
+                if "_orig_idx" not in header:
+                    # Add the column once, populate with current sheet
+                    # row positions (they correspond 1:1 to the source
+                    # data file order on first write).
+                    col_idx = len(header) + 1
+                    ws.cell(row=1, column=col_idx, value="_orig_idx")
+                    for r in range(2, ws.max_row + 1):
+                        ws.cell(row=r, column=col_idx, value=r - 2)
+                    header.append("_orig_idx")
+                orig_col = header.index("_orig_idx") + 1
+                target_sheet_row = None
+                for r in range(2, ws.max_row + 1):
+                    val = ws.cell(row=r, column=orig_col).value
+                    try:
+                        if int(val) == int(row_idx):
+                            target_sheet_row = r
+                            break
+                    except (TypeError, ValueError):
+                        continue
+                if target_sheet_row:
+                    ws.delete_rows(target_sheet_row, 1)
+                wb.save(fp)
+                wb.close()
+                # Update count + bump consumed_count for analytics
+                remaining = max(0, (ws.max_row or 1) - 1)
+                await user_db["uploaded_resources"].update_one(
+                    {"id": upload_data_file_id, "user_id": engine_user_id},
+                    {
+                        "$set": {
+                            "row_count": remaining,
+                            "updated_at": datetime.now(timezone.utc).isoformat(),
+                        },
+                        "$inc": {"consumed_count": 1},
+                    },
+                )
+                # Auto-delete batch + file if completely consumed
+                if remaining == 0:
+                    try:
+                        Path(fp).unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                    await user_db["uploaded_resources"].delete_one(
+                        {"id": upload_data_file_id, "user_id": engine_user_id}
+                    )
+            except Exception as e:
+                logger.debug(f"_live_remove_data_row failed: {e}")
+
     def pick_next_proxy() -> Optional[Dict[str, Any]]:
         """Round-robin pick a proxy, respecting no_repeated_proxy."""
         if no_repeated_proxy:
@@ -1115,6 +1276,9 @@ async def run_real_user_traffic_job(
             raw_line = proxy.get("raw") or ""
             if raw_line:
                 used_proxy_set.add(raw_line)
+                # IMMEDIATE per-use deletion from the saved upload batch
+                # (fire-and-forget — don't block the visit).
+                asyncio.create_task(_live_remove_proxy(raw_line))
         except Exception:
             pass
 
@@ -1124,6 +1288,7 @@ async def run_real_user_traffic_job(
         try:
             if ua:
                 used_ua_set.add(ua)
+                asyncio.create_task(_live_remove_ua(ua))
         except Exception:
             pass
         fp = _fingerprint_from_ua(ua)
@@ -1383,6 +1548,8 @@ async def run_real_user_traffic_job(
                         # Mark the CURRENT row as invalid (drops from pending_leads)
                         async with report_lock:
                             invalid_row_indices.add(row_index)
+                        # Per-use immediate deletion from saved data file
+                        asyncio.create_task(_live_remove_data_row(row_index))
 
                         push_live_step(
                             job_id, i + 1, "submit", "failed",
@@ -1458,6 +1625,8 @@ async def run_real_user_traffic_job(
                 if entry["status"] == "ok" and row_index is not None:
                     async with report_lock:
                         consumed_row_indices.add(row_index)
+                    # IMMEDIATE per-use deletion from saved data file
+                    asyncio.create_task(_live_remove_data_row(row_index))
 
                 # Grab TrustedForm / LeadID proofs (if the landing page uses them)
                 try:
