@@ -119,6 +119,23 @@ User report: 95/100 visits failed with "Executable doesn't exist at /pw-browsers
 
 **Verification**: GET `/api/real-user-traffic/jobs` ab `status=failed` + `error="All UAs filtered by allowed_os=['ios']…"` return kar raha hai.
 
+### Session 10 - Feb 2026 (Permanent Playwright revision-mismatch fix)
+**User report**: "abi test krne laga to phr ye error aya esko permanent solve kro" — image showing red banner: `Playwright browser launch failed: Error: BrowserType.launch: Executable doesn't exist at /pw-browsers/chromium_headless_shell-1148/chrome-linux/headless_shell`.
+
+**Root cause** (this was the THIRD time this bug surfaced — finally diagnosed properly):
+- Pod's `/pw-browsers` had `chromium_headless_shell-1208` (left over from a different Playwright build) but NOT `chromium_headless_shell-1148` (the revision Playwright 1.49.1 actually wants).
+- The previous `_ensure_chromium_available()` used a **glob pattern** `chromium_headless_shell-*` which falsely matched 1208 → returned True → engine attempted launch → Playwright runtime resolved its EXACT pinned path `/pw-browsers/chromium_headless_shell-1148/...` → ENOENT → job failed.
+- The earlier "fix" only ran an unconditional install at startup, which races with quickly-triggered jobs.
+
+**Permanent fix** (`_ensure_chromium_available`):
+- Reads the EXACT chromium-headless-shell revision from Playwright's bundled `driver/package/browsers.json`
+- Verifies `chromium_headless_shell-{revision}/chrome-linux/headless_shell` exists at THAT specific path
+- If missing, runs `playwright install chromium-headless-shell` synchronously (lock-protected) and re-verifies the SAME exact path
+- Falls back to glob only when browsers.json is unreadable (defensive)
+
+**Verification**: Reproduced the bug by renaming `chromium_headless_shell-1148` → `_BACKUP_TEST` so only 1208 was visible. New helper correctly logged `"Playwright chromium-headless-shell rev 1148 missing — installing now"`, downloaded 1148, then returned True. Deleted backup; both 1148 + 1208 now present at /pw-browsers, engine reliably launches.
+
+
 ### Session 9 - Feb 2026 (Click-count bug + strict tracker-URL toggle)
 **User report**: "tracker ka link use kia pr click koi b count ni hoa mein stricktly check krna chahta ho offer tracker k link se redirect ho tak k duplicate recent click se achi taran check hun."
 

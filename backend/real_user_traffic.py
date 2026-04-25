@@ -42,30 +42,79 @@ _CHROMIUM_INSTALL_LOCK = asyncio.Lock()
 
 
 async def _ensure_chromium_available() -> bool:
-    """Returns True when a usable headless_shell binary is present (installing
-    it first if missing). Safe to call before every job — no-op when binary
-    is already present."""
+    """Returns True when the EXACT chromium-headless-shell revision required
+    by the installed Playwright Python package is present (installing it
+    first if missing). Safe to call before every job — no-op when binary
+    is already present.
+
+    NOTE: Earlier versions of this helper used a glob pattern
+    `chromium_headless_shell-*` which matched ANY revision present on disk
+    (e.g. an old 1208 left over from a previous Playwright upgrade) and
+    falsely returned True even though Playwright 1.49.x specifically wanted
+    revision 1148 → BrowserType.launch() blew up with "Executable doesn't
+    exist at /pw-browsers/chromium_headless_shell-1148/...". We now read
+    the EXACT revision from Playwright's bundled browsers.json and verify
+    that specific path exists.
+    """
     browsers_root = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/pw-browsers")
-    try:
-        from pathlib import Path as _P
-        for p in _P(browsers_root).glob("chromium_headless_shell-*"):
-            if (p / "chrome-linux" / "headless_shell").exists():
+
+    def _expected_revision() -> Optional[str]:
+        """Read the chromium-headless-shell revision Playwright expects.
+        Falls back to None if the JSON layout changes."""
+        try:
+            import json as _json
+            import playwright as _pw
+            pw_root = Path(_pw.__file__).parent
+            bj = pw_root / "driver" / "package" / "browsers.json"
+            if not bj.exists():
+                return None
+            with open(bj, "r") as fh:
+                data = _json.load(fh)
+            for entry in data.get("browsers", []):
+                if entry.get("name") == "chromium-headless-shell":
+                    rev = str(entry.get("revision") or "").strip()
+                    return rev or None
+        except Exception as e:
+            logger.debug(f"_expected_revision: {e}")
+        return None
+
+    def _binary_for(rev: Optional[str]) -> Optional[Path]:
+        if not rev:
+            return None
+        return Path(browsers_root) / f"chromium_headless_shell-{rev}" / "chrome-linux" / "headless_shell"
+
+    expected = _expected_revision()
+
+    def _exists() -> bool:
+        # Strict check: the EXACT revision Playwright wants must be present.
+        if expected:
+            bp = _binary_for(expected)
+            if bp and bp.exists():
                 return True
-    except Exception:
-        pass
+            return False
+        # Fallback (only when we can't read browsers.json): glob check.
+        try:
+            for p in Path(browsers_root).glob("chromium_headless_shell-*"):
+                if (p / "chrome-linux" / "headless_shell").exists():
+                    return True
+        except Exception:
+            pass
+        return False
+
+    if _exists():
+        return True
+
     # Missing — install with a lock to prevent duplicate installs when
     # multiple jobs start in parallel on a fresh pod.
     async with _CHROMIUM_INSTALL_LOCK:
         # Re-check after acquiring lock (another coroutine may have just
         # finished the install while we waited).
-        try:
-            from pathlib import Path as _P
-            for p in _P(browsers_root).glob("chromium_headless_shell-*"):
-                if (p / "chrome-linux" / "headless_shell").exists():
-                    return True
-        except Exception:
-            pass
-        logger.warning("Playwright chromium-headless-shell missing — installing now (this may take ~60s)…")
+        if _exists():
+            return True
+        logger.warning(
+            f"Playwright chromium-headless-shell rev {expected or '?'} missing — "
+            f"installing now (this may take ~60s)…"
+        )
         try:
             proc = await asyncio.create_subprocess_exec(
                 "playwright", "install", "chromium-headless-shell",
@@ -86,19 +135,14 @@ async def _ensure_chromium_available() -> bool:
                     f"{(err or b'').decode(errors='ignore')[:300]}"
                 )
                 return False
-            logger.info("Playwright chromium-headless-shell install: OK")
+            logger.info(
+                f"Playwright chromium-headless-shell install: OK (rev {expected or '?'})"
+            )
         except Exception as e:
             logger.error(f"Playwright install failed: {e}")
             return False
-        # Final check
-        try:
-            from pathlib import Path as _P
-            for p in _P(browsers_root).glob("chromium_headless_shell-*"):
-                if (p / "chrome-linux" / "headless_shell").exists():
-                    return True
-        except Exception:
-            pass
-        return False
+        # Final strict check — must satisfy the EXACT revision Playwright wants
+        return _exists()
 
 
 import httpx
