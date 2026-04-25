@@ -10279,33 +10279,125 @@ async def _load_upload_data_file(user_id: str, upload_id: str) -> Optional[Tuple
     return (fp, doc.get("file_name") or "leads.xlsx")
 
 
-async def _consume_uploads(user_id: str, upload_ids: List[str]) -> None:
-    """Delete consumed upload documents + their on-disk files. Called when
-    an RUT job finishes so the batch is never reused."""
+async def _consume_uploads(
+    user_id: str,
+    upload_ids: List[str],
+    used_proxy_raws: Optional[List[str]] = None,
+    used_ua_strings: Optional[List[str]] = None,
+    pending_leads_path: Optional[str] = None,
+) -> None:
+    """Selectively prune ONLY the items actually consumed by an RUT job
+    from the saved upload batches — not the whole batch. Behaviour per type:
+
+      proxies      → remove only the raw lines listed in `used_proxy_raws`
+                     from items[]; if the batch becomes empty, delete it.
+      user_agents  → remove only the UA strings listed in `used_ua_strings`
+                     from items[]; if the batch becomes empty, delete it.
+      data_file    → replace the on-disk file with `pending_leads.xlsx`
+                     (rows that were NOT submitted). If 0 rows remain or
+                     the pending file is missing, delete the batch.
+      automation_json → never reaches this hook (excluded at job creation).
+
+    This matches user expectation: "1000 proxies upload kien, sirf jo use
+    huin wahi remove ho — baqi batch saved rahe."
+    """
     upload_ids = [u for u in (upload_ids or []) if u]
     if not upload_ids:
         return
     user_db = get_user_db(user_id)
-    # Fetch file paths first
+
+    used_proxy_set = {str(s).strip() for s in (used_proxy_raws or []) if str(s).strip()}
+    used_ua_set = {str(s).strip() for s in (used_ua_strings or []) if str(s).strip()}
+    now_iso = datetime.now(timezone.utc).isoformat()
+
     try:
-        async for doc in user_db["uploaded_resources"].find(
-            {"id": {"$in": upload_ids}, "user_id": user_id, "type": "data_file"},
-            {"_id": 0, "file_path": 1},
-        ):
-            fp = doc.get("file_path")
-            if fp:
-                try:
-                    Path(fp).unlink(missing_ok=True)
-                except Exception:
-                    pass
-    except Exception:
-        pass
-    try:
-        await user_db["uploaded_resources"].delete_many(
-            {"id": {"$in": upload_ids}, "user_id": user_id}
+        cursor = user_db["uploaded_resources"].find(
+            {"id": {"$in": upload_ids}, "user_id": user_id},
+            {"_id": 0},
         )
-    except Exception:
-        pass
+        async for doc in cursor:
+            up_id = doc.get("id")
+            up_type = doc.get("type")
+
+            if up_type == "proxies":
+                items = [str(x) for x in (doc.get("items") or []) if str(x).strip()]
+                remaining = [it for it in items if it.strip() not in used_proxy_set]
+                if not remaining:
+                    await user_db["uploaded_resources"].delete_one(
+                        {"id": up_id, "user_id": user_id}
+                    )
+                else:
+                    await user_db["uploaded_resources"].update_one(
+                        {"id": up_id, "user_id": user_id},
+                        {"$set": {
+                            "items": remaining,
+                            "count": len(remaining),
+                            "updated_at": now_iso,
+                        }},
+                    )
+
+            elif up_type == "user_agents":
+                items = [str(x) for x in (doc.get("items") or []) if str(x).strip()]
+                remaining = [it for it in items if it.strip() not in used_ua_set]
+                if not remaining:
+                    await user_db["uploaded_resources"].delete_one(
+                        {"id": up_id, "user_id": user_id}
+                    )
+                else:
+                    await user_db["uploaded_resources"].update_one(
+                        {"id": up_id, "user_id": user_id},
+                        {"$set": {
+                            "items": remaining,
+                            "count": len(remaining),
+                            "updated_at": now_iso,
+                        }},
+                    )
+
+            elif up_type == "data_file":
+                current_fp = doc.get("file_path") or ""
+                pending_p = Path(pending_leads_path) if pending_leads_path else None
+                if pending_p and pending_p.exists():
+                    # Count remaining rows in pending_leads.xlsx
+                    pending_rows = -1
+                    try:
+                        import openpyxl
+                        wb = openpyxl.load_workbook(str(pending_p), read_only=True)
+                        ws = wb.active
+                        # Subtract 1 for the header row
+                        pending_rows = max(0, (ws.max_row or 1) - 1)
+                        wb.close()
+                    except Exception as e:
+                        logger.debug(f"pending_leads row count failed: {e}")
+
+                    if pending_rows == 0:
+                        # Everything consumed → delete file + batch
+                        if current_fp:
+                            try:
+                                Path(current_fp).unlink(missing_ok=True)
+                            except Exception:
+                                pass
+                        await user_db["uploaded_resources"].delete_one(
+                            {"id": up_id, "user_id": user_id}
+                        )
+                    else:
+                        # Replace stored file with the pending leads file
+                        if current_fp:
+                            try:
+                                import shutil
+                                shutil.copyfile(str(pending_p), current_fp)
+                                update_set = {"updated_at": now_iso}
+                                if pending_rows > 0:
+                                    update_set["row_count"] = pending_rows
+                                await user_db["uploaded_resources"].update_one(
+                                    {"id": up_id, "user_id": user_id},
+                                    {"$set": update_set},
+                                )
+                            except Exception as e:
+                                logger.warning(f"data_file pending replace failed: {e}")
+                # else: pending file missing — leave batch + file untouched
+                # so the user doesn't lose their data on a failed run.
+    except Exception as e:
+        logger.warning(f"_consume_uploads error for user={user_id}: {e}")
 
 
 app.include_router(api_router)

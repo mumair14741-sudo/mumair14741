@@ -887,6 +887,7 @@ async def run_real_user_traffic_job(
 
     # State shared across tasks
     used_proxy_set: set = set()
+    used_ua_set: set = set()  # distinct UA strings actually picked for visits
     consumed_row_indices: set = set()   # rows OK-submitted — NOT reused, removed from pending_leads
     invalid_row_indices: set = set()    # rows that triggered a validation error — ALSO removed from pending_leads
     state = {"proxy_idx": 0, "ua_idx": 0, "row_idx": 0, "start_time": time.time()}
@@ -996,7 +997,25 @@ async def run_real_user_traffic_job(
             await _record(job_id, entry, report, report_lock, db)
             return
 
+        # Mark this proxy raw as USED (attempted in a visit). Used by the
+        # post-job upload-consume hook so only proxies actually consumed
+        # in this run get removed from the saved batch — unused proxies
+        # remain in the user's "Uploaded Things" library.
+        try:
+            raw_line = proxy.get("raw") or ""
+            if raw_line:
+                used_proxy_set.add(raw_line)
+        except Exception:
+            pass
+
         ua = pick_next_ua()
+        # Track UA strings used so the upload-consume hook removes only
+        # those that were actually attempted, not the entire UA batch.
+        try:
+            if ua:
+                used_ua_set.add(ua)
+        except Exception:
+            pass
         fp = _fingerprint_from_ua(ua)
 
         entry["proxy"] = proxy.get("server", "")
@@ -1760,6 +1779,11 @@ async def run_real_user_traffic_job(
         "leftover_leads_count": (len(rows) - len(consumed_row_indices) - len(invalid_row_indices)) if rows else 0,
         "consumed_leads_count": len(consumed_row_indices),
         "invalid_leads_count": len(invalid_row_indices),
+        # Tracked so the post-finish upload-consume hook can selectively
+        # prune ONLY the proxies / UAs actually used during this run from
+        # the saved upload batches (not the entire batch).
+        "used_proxy_raws": list(used_proxy_set),
+        "used_ua_strings": list(used_ua_set),
     })
     # Remove the non-serializable asyncio.Event before any DB persist
     RUT_JOBS[job_id].pop("_cancel_event", None)
@@ -1772,7 +1796,10 @@ async def run_real_user_traffic_job(
     try:
         if db is not None:
             job_record = await db.real_user_traffic_jobs.find_one(
-                {"job_id": job_id}, {"_id": 0, "consume_upload_ids": 1, "user_id": 1}
+                {"job_id": job_id},
+                {"_id": 0, "consume_upload_ids": 1, "user_id": 1,
+                 "used_proxy_raws": 1, "used_ua_strings": 1,
+                 "pending_leads_path": 1},
             )
             if job_record:
                 upload_ids = job_record.get("consume_upload_ids") or []
@@ -1780,13 +1807,21 @@ async def run_real_user_traffic_job(
                 if upload_ids and uid:
                     try:
                         from server import _consume_uploads  # avoid top-level cycle
-                        await _consume_uploads(uid, upload_ids)
+                        await _consume_uploads(
+                            uid,
+                            upload_ids,
+                            used_proxy_raws=job_record.get("used_proxy_raws") or [],
+                            used_ua_strings=job_record.get("used_ua_strings") or [],
+                            pending_leads_path=job_record.get("pending_leads_path") or "",
+                        )
                         # Clear the consume list so we don't double-process
                         await db.real_user_traffic_jobs.update_one(
                             {"job_id": job_id},
                             {"$set": {"consume_upload_ids": [], "consumed_upload_ids_final": upload_ids}},
                         )
-                        logger.info(f"RUT job {job_id}: consumed {len(upload_ids)} uploaded batch(es)")
+                        logger.info(f"RUT job {job_id}: pruned {len(upload_ids)} uploaded batch(es) — "
+                                    f"removed {len(job_record.get('used_proxy_raws') or [])} used proxies, "
+                                    f"{len(job_record.get('used_ua_strings') or [])} used UAs")
                     except Exception as e:
                         logger.warning(f"RUT job {job_id}: upload consume failed: {e}")
     except Exception as e:
