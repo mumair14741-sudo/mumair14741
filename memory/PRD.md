@@ -119,6 +119,22 @@ User report: 95/100 visits failed with "Executable doesn't exist at /pw-browsers
 
 **Verification**: GET `/api/real-user-traffic/jobs` ab `status=failed` + `error="All UAs filtered by allowed_os=['ios']…"` return kar raha hai.
 
+### Session 11 - Feb 2026 (Engine Status badge on RUT page)
+**User request**: "Engine Status badge add kar do — green dot if chromium ready, yellow if installing, red if failed."
+
+**Implementation**:
+1. **Backend** (`real_user_traffic.py`):
+   - New `get_engine_status()` helper that reads Playwright's `driver/package/browsers.json` for the EXACT chromium-headless-shell revision, checks the on-disk binary at that specific path, and returns `{status, message, expected_revision, browser_path}`.
+   - Status values: `ready` (binary present), `installing` (module-level `_CHROMIUM_INSTALL_IN_PROGRESS` flag is True, set/unset in `_ensure_chromium_available`'s finally block), `missing`, `error`.
+2. **Backend endpoint** (`server.py`): `GET /api/real-user-traffic/engine-status` — auth + `real_user_traffic` feature gated; strips `browser_path` from the response (only returns `{status, message, expected_revision}` so server paths don't leak).
+3. **Frontend** (`RealUserTrafficPage.js`):
+   - `EngineStatusBadge` component — coloured dot + label + revision text. Pulse animation on `installing`. `data-testid="rut-engine-status-badge"` plus `data-engine-status` attribute for tests.
+   - `fetchEngineStatus()` polled every 5s via `setInterval`; cleaned up in the same `useEffect` cleanup as the live-step poller. Initial state `ready` so first paint isn't a red flash.
+   - Badge rendered in page header (right side), aligned to the H1 title.
+
+**Tests**: iteration_14.json — 18/18 passing. Endpoint auth-gated (401/403), schema correct, expected_revision matches Playwright's pinned 1148, no regression in iteration_13 RUT endpoints.
+
+
 ### Session 10 - Feb 2026 (Permanent Playwright revision-mismatch fix)
 **User report**: "abi test krne laga to phr ye error aya esko permanent solve kro" — image showing red banner: `Playwright browser launch failed: Error: BrowserType.launch: Executable doesn't exist at /pw-browsers/chromium_headless_shell-1148/chrome-linux/headless_shell`.
 
