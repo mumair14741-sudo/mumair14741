@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 11 review — RUT engine refactor from 'launch new browser per visit' → 'ONE shared Chromium browser per job + browser.new_context(proxy=…) per visit'. Backend: 9/9 new shared-browser tests + 19/19 iteration-10 regression = 28/28 (100%). End-to-end 3-visit job with concurrency=3 verified live-log shows 'Shared Chromium ready · concurrency=3' followed by per-visit setup steps with isolated UA/viewport/fingerprints proving each visit got its own context from the single shared browser. Job reaches terminal state (failed expected — 203.0.113.x dummy proxies don't connect). Stop endpoint correctly transitions running → stopped within ~120-150s (gated by in-flight page.goto 45s timeout + context cleanup, not the refactor). NO 'Browser has been closed' errors observed in backend logs during 3-visit run.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "RUT engine startup / `_ensure_chromium_available()`", "issue": "Chromium binary mismatch — Playwright Python 1.49.1 expects build `chromium_headless_shell-1148` but only `chromium_headless_shell-1208` was installed at /pw-browsers, causing initial 'Executable doesn't exist at /pw-browsers/chromium_headless_shell-1148/chrome-linux/headless_shell' on the FIRST job. `_ensure_chromium_available()` glob-searches for ANY `chromium_headless_shell-*` and reports OK if found — too lax: it should match the exact build the bundled playwright lib expects. Workaround applied during testing: ran `python -m playwright install chromium-headless-shell` to fetch build 1148. NOT introduced by this refactor — the previous per-visit launch path would hit the same error. Fix recommendation: tighten `_ensure_chromium_available()` to call `pw.chromium.launch().close()` once at startup as the source-of-truth probe, and have the install fallback re-run on launch failure too."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_iteration11_rut_shared_browser.py",
+    "/app/test_reports/pytest/iteration11_rut_shared_browser.xml",
+    "/app/test_reports/pytest/iteration11_full.xml"
+  ],
+  "action_items": [
+    "(Optional / hardening) Strengthen `_ensure_chromium_available()` in /app/backend/real_user_traffic.py:44 — current glob `chromium_headless_shell-*` accepts mismatched builds. On a pod where only build 1208 is staged but Playwright lib expects 1148, the function returns OK but the very next `pw.chromium.launch()` fails. Either (a) inspect `playwright._impl._driver` for the expected build number, or (b) do a one-shot `await pw.chromium.launch(); await b.close()` probe and trigger install on Exception.",
+    "(Optional) Stop-endpoint responsiveness — when cancel_event fires while a worker is mid `page.goto(timeout=45000)`, the stop wait drains for ~45s+. Consider passing a shorter timeout when cancel_event is set, or using `page.goto(..., timeout=15000)` for the dummy/test path."
+  ],
+  "critical_code_review_comments": [
+    "The shared-browser refactor is sound: chromium.launch() appears EXACTLY ONCE in real_user_traffic.py (regex-verified), process_one() takes shared_browser as arg, browser.new_context(proxy=…) is the only context creation point, finally-block at line 1471-1479 closes only the per-visit context (with explicit comment 'Browser is shared across visits'), and the parent dispatcher closes the shared browser + playwright runtime at lines 1611-1620 AFTER asyncio.gather. Concurrency clamped to (1, 20) via Semaphore — verified.",
+    "Per-visit context correctly carries proxy + UA + viewport + locale + timezone + geolocation + Accept-Language + permissions + add_init_script(stealth) — full per-visit isolation, identical to per-launch behaviour from a detection-script's POV. Verified end-to-end: 3 visits all got distinct UA / viewport / OS strings as expected.",
+    "Conversions-mode dispatcher (line 1540-1603) uses spawn-pool over the SHARED browser correctly — no risk of N parallel browser launches even with target_mode='conversions' + max_attempts=1000.",
+    "MINOR — The shared browser launch's exception path (line 1524-1531) calls `_finalise(failed)` and returns without push_live_step'ing the failure detail. The user only sees 'Verifying browser engine…' as the last live-log entry then the job flips to failed. Consider emitting `push_live_step(job_id, 0, 'preflight', 'failed', f'Shared browser launch failed: {e}')` so the UI shows WHY the engine couldn't start.",
+    "MINOR — Pre-existing E701/E401 lint warnings in real_user_traffic.py acknowledged as out-of-scope (review-request notes)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration11_rut_shared_browser.py (new, 9 tests)",
+    "(env) Installed missing /pw-browsers/chromium_headless_shell-1148 via `playwright install chromium-headless-shell` to unblock the live e2e job test"
+  ],
+  "success_rate": {"backend": "100% (9/9 new + 19/19 iter-10 regression = 28/28)", "frontend": "n/a — backend-only review per request"},
+  "test_credentials": "Admin: admin@trackmaster.local / admin123. Dynamic test users TEST_rut11_*@example.com / Passw0rd!.",
+  "seed_data_creation": "Per-session: 1 fresh registered user (real_user_traffic + links features enabled), 1 link with offer_url=https://example.com. Two short-lived RUT jobs created during e2e tests (3 visits / 10 visits) — both reached terminal state.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Re-run with: `REACT_APP_BACKEND_URL=https://project-track-8.preview.emergentagent.com pytest backend/tests/test_iteration11_rut_shared_browser.py backend/tests/test_iteration10_rut_thankyou_and_target_mode.py -v`. Total runtime ~4-5 minutes (most of it is the 3-visit dummy-proxy job blocking on 45s page.goto timeouts). The end-to-end test PROVES the refactor works: live_steps after a job-run contains idx=2 'Shared Chromium ready · concurrency=N' followed by per-visit setup entries with distinct UA/viewport. Code-inspection assertions verify chromium.launch is called exactly once. NOTE: chromium binary mismatch issue may resurface on fresh pods — if first run shows 'Executable doesn't exist /pw-browsers/chromium_headless_shell-1148', run `python -m playwright install chromium-headless-shell` to install the matching build; this is an environment/install issue NOT the refactor.",
+  "rca of the issue": "Initial smoke run revealed `Playwright browser launch failed: Executable doesn't exist at /pw-browsers/chromium_headless_shell-1148/chrome-linux/headless_shell`. Root cause: Playwright Python 1.49.1 hard-codes build number 1148 at launch time, but the pod had staged only `chromium_headless_shell-1208` (newer). `_ensure_chromium_available()` matches any `chromium_headless_shell-*` glob so it incorrectly reported the engine ready. Mitigation: ran `python -m playwright install chromium-headless-shell` which fetched build 1148 (1.6 MiB), after which `pw.chromium.launch()` + `browser.new_context()` both succeed. This is NOT a regression introduced by the shared-browser refactor — the previous per-visit code-path would hit the same error. Permanent fix recommendation captured under action_items #1."
+}

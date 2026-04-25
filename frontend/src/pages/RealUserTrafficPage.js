@@ -102,7 +102,7 @@ export default function RealUserTrafficPage() {
 
   // Run settings
   const [totalClicks, setTotalClicks] = useState(10);
-  const [concurrency, setConcurrency] = useState(3);
+  const [concurrency, setConcurrency] = useState(15);
   const [durationMinutes, setDurationMinutes] = useState(0);
   // Target-mode: "clicks" = N fixed visits, "conversions" = keep trying
   // until X thank-you pages reached (capped by max_attempts for safety)
