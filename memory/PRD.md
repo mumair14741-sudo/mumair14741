@@ -119,6 +119,23 @@ User report: 95/100 visits failed with "Executable doesn't exist at /pw-browsers
 
 **Verification**: GET `/api/real-user-traffic/jobs` ab `status=failed` + `error="All UAs filtered by allowed_os=['ios']…"` return kar raha hai.
 
+### Session 9 - Feb 2026 (Click-count bug + strict tracker-URL toggle)
+**User report**: "tracker ka link use kia pr click koi b count ni hoa mein stricktly check krna chahta ho offer tracker k link se redirect ho tak k duplicate recent click se achi taran check hun."
+
+**Root cause — MAJOR DB-name mismatch bug**:
+- `server.py::get_user_db(user_id)` uses `f"trackmaster_user_{user_id.replace('-', '_')[:20]}"` (20-char truncated, underscore-normalised) for all dashboard / clicks / link-stats reads.
+- `real_user_traffic.py::_log_click_for_link()` was writing directly to `f"trackmaster_user_{owner_id}"` with the **full hyphenated UUID**.
+- Result: RUT clicks silently landed in an **orphaned database** (e.g. `trackmaster_user_6e0e38a5-08f3-4403-90d8-5e4cf0813b1a`) while the Dashboard/Clicks page queried a DIFFERENT database (`trackmaster_user_6e0e38a5_08f3_4403_9`) and saw **zero** clicks. 5 users (including this admin) had 648 clicks stranded across orphan DBs.
+
+**Fix**:
+1. `_log_click_for_link()` updated to use the same 20-char truncated key. Added a comment explaining the contract.
+2. One-off migration moved 648 clicks from 7 orphaned DBs into the canonical truncated DBs, then dropped the orphans. User's dashboard instantly jumped from 0 → 631 clicks.
+3. Added `force_tracker_url: bool = Form(False)` to POST /api/real-user-traffic/jobs. When True, `_rut_build_target_url()` skips the preview-pod auto-bypass so the browser is forced through `/api/t/<short_code>` on THIS pod.
+4. Frontend `RealUserTrafficPage.js`: new `forceTrackerUrl` state + `CheckRow` toggle "🎯 Strict tracker URL" with inline help text.
+
+**Tests**: iteration_13.json — 11/11 passing. Dashboard returns 631 clicks; `force_tracker_url=true` → target_url contains `/api/t/<short_code>`; default behaviour still swaps to offer host.
+
+
 ### Session 7 - Feb 2026 (Selective consume of uploaded batches — bug fix)
 **User report**: "1000 proxies upload kien, kuch use hoin, lekin pori file delete ho gayi — same issue UAs aur data file pe bhi."
 
