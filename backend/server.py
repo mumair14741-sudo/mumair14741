@@ -3673,6 +3673,50 @@ async def rut_engine_status(user: dict = Depends(get_current_user)):
     }
 
 
+@api_router.post("/real-user-traffic/engine-prewarm")
+async def rut_engine_prewarm(
+    background: BackgroundTasks,
+    user: dict = Depends(get_current_user),
+):
+    """Trigger a chromium-headless-shell install in the background so the
+    user can pre-warm the engine while configuring their RUT job. Idempotent:
+    if the binary is already present (status=ready), returns {already_ready: true}
+    without spawning anything; if an install is already running, returns
+    {already_installing: true}; otherwise schedules `_ensure_chromium_available`
+    as a background task and returns immediately with {started: true}.
+    Frontend should re-poll the status endpoint to watch progress."""
+    check_user_feature(user, "real_user_traffic")
+    info = _rut_get_engine_status()
+    cur_status = info.get("status")
+    if cur_status == "ready":
+        return {
+            "started": False,
+            "already_ready": True,
+            "status": "ready",
+            "expected_revision": info.get("expected_revision"),
+            "message": info.get("message"),
+        }
+    if cur_status == "installing":
+        return {
+            "started": False,
+            "already_installing": True,
+            "status": "installing",
+            "expected_revision": info.get("expected_revision"),
+            "message": info.get("message"),
+        }
+
+    # Fire-and-forget background install. The helper handles the
+    # in-progress flag + lock so concurrent prewarm clicks are safe.
+    from real_user_traffic import _ensure_chromium_available as _ensure_cm
+    background.add_task(_ensure_cm)
+    return {
+        "started": True,
+        "status": "installing",
+        "expected_revision": info.get("expected_revision"),
+        "message": "Prewarm started — refresh status in a moment",
+    }
+
+
 # NOTE: /jobs/pending-candidates MUST be declared before /jobs/{job_id}
 # because FastAPI matches routes in declaration order.
 @api_router.get("/real-user-traffic/jobs/pending-candidates")

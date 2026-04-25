@@ -31,6 +31,7 @@ import {
   Monitor,
   Activity,
   X,
+  Zap,
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -83,7 +84,7 @@ function StatusBadge({ status }) {
   );
 }
 
-function EngineStatusBadge({ status }) {
+function EngineStatusBadge({ status, onPrewarm, prewarming }) {
   // status = { status: "ready"|"installing"|"missing"|"error", message, expected_revision }
   const s = status?.status || "ready";
   const config = {
@@ -128,12 +129,16 @@ function EngineStatusBadge({ status }) {
     label: "Engine",
   };
 
+  // Show prewarm button only when engine is NOT ready and NOT actively
+  // installing (so users don't double-click while a download is in progress).
+  const canPrewarm = s === "missing" || s === "error";
+
   return (
     <div
       data-testid="rut-engine-status-badge"
       data-engine-status={s}
       title={status?.message || config.label}
-      className={`flex-shrink-0 flex items-center gap-2 px-3 py-2 rounded-lg border ${config.borderClass} text-xs`}
+      className={`flex-shrink-0 flex items-center gap-3 px-3 py-2 rounded-lg border ${config.borderClass} text-xs`}
     >
       <span className="relative flex w-2.5 h-2.5">
         {config.pulse && (
@@ -147,6 +152,18 @@ function EngineStatusBadge({ status }) {
           {status?.expected_revision ? `Chromium rev ${status.expected_revision}` : (status?.message || "")}
         </span>
       </div>
+      {canPrewarm && onPrewarm && (
+        <button
+          type="button"
+          data-testid="rut-engine-prewarm-btn"
+          onClick={onPrewarm}
+          disabled={prewarming}
+          className="ml-1 px-2.5 py-1.5 rounded-md text-[11px] font-semibold border border-amber-700/60 bg-amber-900/40 text-amber-100 hover:bg-amber-900/70 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+        >
+          <Zap size={12} />
+          {prewarming ? "Starting…" : "Pre-warm"}
+        </button>
+      )}
     </div>
   );
 }
@@ -236,6 +253,7 @@ export default function RealUserTrafficPage() {
     expected_revision: null,
   });
   const engineTimerRef = useRef(null);
+  const [enginePrewarming, setEnginePrewarming] = useState(false);
 
   const token = () => localStorage.getItem("token");
   const authH = () => ({ Authorization: `Bearer ${token()}` });
@@ -367,6 +385,42 @@ export default function RealUserTrafficPage() {
         });
       }
     } catch (e) { /* ignore — keep last known status */ }
+  };
+
+  const handleEnginePrewarm = async () => {
+    if (enginePrewarming) return;
+    setEnginePrewarming(true);
+    // Optimistic flip to "installing" so the badge gives instant feedback
+    // even before the next poll cycle lands.
+    setEngineStatus((prev) => ({
+      ...prev,
+      status: "installing",
+      message: "Prewarm requested — downloading Chromium…",
+    }));
+    try {
+      const r = await fetch(`${API_URL}/api/real-user-traffic/engine-prewarm`, {
+        method: "POST",
+        headers: authH(),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.ok) {
+        if (data.already_ready) {
+          toast.success("Engine already ready");
+        } else if (data.already_installing) {
+          toast.info("Install already in progress");
+        } else {
+          toast.success("Pre-warm started — engine will be ready in ~60s");
+        }
+        // Force an immediate re-fetch so the badge picks up the real status
+        fetchEngineStatus();
+      } else {
+        toast.error(data.detail || "Pre-warm failed");
+      }
+    } catch (e) {
+      toast.error("Pre-warm error: " + (e.message || e));
+    } finally {
+      setEnginePrewarming(false);
+    }
   };
 
   const fetchUploadedLibrary = async () => {
@@ -680,8 +734,14 @@ export default function RealUserTrafficPage() {
         </div>
         {/* Engine Status badge — auto-polled every 5s. Lets users know
             instantly whether the Chromium engine is ready, still
-            installing on a fresh pod, missing, or errored. */}
-        <EngineStatusBadge status={engineStatus} />
+            installing on a fresh pod, missing, or errored. Pre-warm
+            button appears when status is missing/error so users can
+            kick off the install BEFORE running a campaign. */}
+        <EngineStatusBadge
+          status={engineStatus}
+          onPrewarm={handleEnginePrewarm}
+          prewarming={enginePrewarming}
+        />
       </div>
 
       {/* ═══ Select Link ═══ */}
