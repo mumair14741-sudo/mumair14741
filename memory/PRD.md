@@ -119,6 +119,30 @@ User report: 95/100 visits failed with "Executable doesn't exist at /pw-browsers
 
 **Verification**: GET `/api/real-user-traffic/jobs` ab `status=failed` + `error="All UAs filtered by allowed_os=['ios']…"` return kar raha hai.
 
+### Session 13 - Feb 2026 (BIG bug fixes — 0 conversions root-cause)
+**User report**: Uploaded RUT job result zip (`real-user-traffic-84d03a3f.zip`) showing 71/100 visits `skipped_captcha`, 26 `failed`, 0 conversions on link `2735ad44` despite using Android proxies+UAs with the link's `allowed_os=['android']`.
+
+**Root cause #1 — Tracker OS case-sensitivity** (server.py:9855):
+- `device_info["os_name"]` returns title-case ("Android", "iOS", "Windows", "macOS")
+- Link config stores OS chips lowercase (`['android']`)
+- Old check: `if visitor_os not in allowed_os:` → `'Android' not in ['android']` → **True for every Android visitor** → returned 403 "Device Restricted" page.
+- **Fix**: case-folded comparison — both sides `.strip().lower()` before `in` test.
+
+**Root cause #2 — Captcha detector false-positive** (form_filler.py:_page_has_captcha):
+- Old code did naive substring match for the words: `recaptcha`, `g-recaptcha`, `hcaptcha`, `h-captcha`, `turnstile`, `cloudflare/turnstile`, `challenge-platform`, `captcha`.
+- Cloudflare/Emergent's preview-pod edge injects `<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js">` (passive bot-analytics) into EVERY response. This matched `"challenge-platform"` → marked **every** visit through preview-pod tracker as `skipped_captcha`.
+- The bare word `"captcha"` was also too broad (false-positives on prose / blog mentions).
+- **Fix**: rewrote `_page_has_captcha` with a `CAPTCHA_PATTERNS` list of regexes that match only GENUINE challenge widgets:
+  - iframe srcs on `challenges.cloudflare.com`, `google.com/recaptcha`, `recaptcha.net`, `hcaptcha.com`
+  - div classes `g-recaptcha`, `h-captcha`, `cf-turnstile`
+  - iframe titles `recaptcha` / `hcaptcha`
+  - real CF interstitial markers (`__cf_chl_jschl_tk__`, `__cf_chl_managed_tk__`, `cf-mitigated`)
+
+**Tests**: iteration_16.json — 23/23 new pytest cases passing in `/app/backend/tests/test_iteration16_os_fold_and_captcha.py` + 35/35 iteration_14/15 regression = **58/58 total**. Verified true-positives + true-negatives for both fixes. Tracker tests use fresh `X-Forwarded-For` IPs to bypass the duplicate-IP blocker isolation.
+
+**User impact**: With both fixes in place, the same campaign that scored 0 conversions should now have all 71 previously-rejected visits actually reach the offer page. Strict tracker URL toggle is also genuinely usable now (was effectively broken on preview-pod hosts due to the Cloudflare false-positive).
+
+
 ### Session 12 - Feb 2026 (Pre-warm engine button)
 **User request**: "Engine badge ke saath ek 'Pre-warm engine' button bhi rakh dein — fresh pod hote hi ek click pe chromium download trigger ho, badge yellow ho, 60s baad green."
 
