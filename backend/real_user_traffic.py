@@ -1025,11 +1025,25 @@ async def run_real_user_traffic_job(
     # User asked: "ek line use hoe wo sath he delete ho jay" — so as soon
     # as a proxy / UA / row gets consumed in a visit we $pull it from the
     # saved upload batch (or rewrite the on-disk XLSX). Fire-and-forget
-    # tasks so the visit isn't blocked by Mongo round-trips.
+    # tasks so the visit isn't blocked by Mongo round-trips. We track every
+    # task in `_live_pending_tasks` so the job can await all of them
+    # before _finalise_and_persist — without this guard, the LAST visit's
+    # $pull was reliably lost when the orchestrator finished too quickly
+    # (testing agent caught this: consumed_count = N-1 instead of N).
     _live_proxy_pulled: set = set()  # avoid duplicate $pulls
     _live_ua_pulled: set = set()
+    _live_pending_tasks: List[asyncio.Task] = []
     _data_file_lock = asyncio.Lock()  # serialise XLSX rewrites
     user_db_truncated = (engine_user_id or "").replace("-", "_")[:20]
+
+    def _spawn_live(coro) -> None:
+        """Schedule a live-remove coroutine and remember it so the job can
+        await completion at the end. Replaces bare `asyncio.create_task`."""
+        try:
+            t = asyncio.create_task(coro)
+            _live_pending_tasks.append(t)
+        except Exception:
+            pass
 
     async def _live_remove_proxy(raw: str):
         if not (engine_user_id and upload_proxy_id and db is not None and raw):
@@ -1054,12 +1068,12 @@ async def run_real_user_traffic_job(
                     {"id": upload_proxy_id, "user_id": engine_user_id},
                     {"_id": 0, "items": 1},
                 )
-                if doc and not (doc.get("items") or []):
+                if doc and isinstance(doc.get("items"), list) and len(doc["items"]) == 0:
                     await user_db["uploaded_resources"].delete_one(
                         {"id": upload_proxy_id, "user_id": engine_user_id}
                     )
         except Exception as e:
-            logger.debug(f"_live_remove_proxy failed: {e}")
+            logger.warning(f"_live_remove_proxy update_one failed: {type(e).__name__}: {e}")
 
     async def _live_remove_ua(ua: str):
         if not (engine_user_id and upload_ua_id and db is not None and ua):
@@ -1083,7 +1097,7 @@ async def run_real_user_traffic_job(
                     {"id": upload_ua_id, "user_id": engine_user_id},
                     {"_id": 0, "items": 1},
                 )
-                if doc and not (doc.get("items") or []):
+                if doc and isinstance(doc.get("items"), list) and len(doc["items"]) == 0:
                     await user_db["uploaded_resources"].delete_one(
                         {"id": upload_ua_id, "user_id": engine_user_id}
                     )
@@ -1278,7 +1292,7 @@ async def run_real_user_traffic_job(
                 used_proxy_set.add(raw_line)
                 # IMMEDIATE per-use deletion from the saved upload batch
                 # (fire-and-forget — don't block the visit).
-                asyncio.create_task(_live_remove_proxy(raw_line))
+                _spawn_live(_live_remove_proxy(raw_line))
         except Exception:
             pass
 
@@ -1288,7 +1302,7 @@ async def run_real_user_traffic_job(
         try:
             if ua:
                 used_ua_set.add(ua)
-                asyncio.create_task(_live_remove_ua(ua))
+                _spawn_live(_live_remove_ua(ua))
         except Exception:
             pass
         fp = _fingerprint_from_ua(ua)
@@ -1549,7 +1563,7 @@ async def run_real_user_traffic_job(
                         async with report_lock:
                             invalid_row_indices.add(row_index)
                         # Per-use immediate deletion from saved data file
-                        asyncio.create_task(_live_remove_data_row(row_index))
+                        _spawn_live(_live_remove_data_row(row_index))
 
                         push_live_step(
                             job_id, i + 1, "submit", "failed",
@@ -1626,7 +1640,7 @@ async def run_real_user_traffic_job(
                     async with report_lock:
                         consumed_row_indices.add(row_index)
                     # IMMEDIATE per-use deletion from saved data file
-                    asyncio.create_task(_live_remove_data_row(row_index))
+                    _spawn_live(_live_remove_data_row(row_index))
 
                 # Grab TrustedForm / LeadID proofs (if the landing page uses them)
                 try:
@@ -2050,6 +2064,34 @@ async def run_real_user_traffic_job(
     except Exception as e:
         logger.warning(f"zip build failed: {e}")
 
+    # ── Await all pending live-remove tasks BEFORE finalising ────────
+    # The fire-and-forget _spawn_live() calls scheduled per-visit $pull /
+    # XLSX-rewrite tasks. If we finalise the job before they complete the
+    # LAST visit's deletion is sometimes lost (testing agent caught this:
+    # consumed_count ended at N-1 instead of N). Drain the queue here so
+    # uploaded_resources reflects the FULL set of consumed items by the
+    # time the job is marked completed.
+    logger.info(
+        f"RUT job {job_id}: draining {len(_live_pending_tasks)} live-remove "
+        f"tasks (proxy={len(_live_proxy_pulled)} ua={len(_live_ua_pulled)})"
+    )
+    if _live_pending_tasks:
+        try:
+            results = await asyncio.wait_for(
+                asyncio.gather(*_live_pending_tasks, return_exceptions=True),
+                timeout=30.0,
+            )
+            errs = [r for r in results if isinstance(r, Exception)]
+            if errs:
+                logger.warning(f"RUT job {job_id}: {len(errs)} live-remove tasks raised: {errs[:3]}")
+        except asyncio.TimeoutError:
+            logger.warning(
+                f"RUT job {job_id}: {len(_live_pending_tasks)} live-remove tasks "
+                f"didn't finish in 30s — proceeding with finalise anyway"
+            )
+        except Exception as e:
+            logger.debug(f"live-remove drain error: {e}")
+
     RUT_JOBS[job_id].update({
         "status": "stopped" if was_cancelled else "completed",
         "finished_at": datetime.now(timezone.utc).isoformat(),
@@ -2066,45 +2108,51 @@ async def run_real_user_traffic_job(
     })
     # Remove the non-serializable asyncio.Event before any DB persist
     RUT_JOBS[job_id].pop("_cancel_event", None)
-    if db is not None:
-        await _persist(db, job_id)
 
-    # Auto-consume any "Uploaded Things" batches that fed this job — we
-    # only learn which ones after persisting, so the consume IDs are
-    # fetched directly from the DB record the API stored.
-    try:
-        if db is not None:
-            job_record = await db.real_user_traffic_jobs.find_one(
+    # ── Auto-consume any "Uploaded Things" batches BEFORE persisting ─
+    # The live-remove tasks above pull each used proxy / UA / row in
+    # real-time. This batched consume is now a SAFETY-NET that mops up
+    # anything the live path missed (e.g. a $pull that raced with
+    # auto-delete of an empty batch). We run it BEFORE _persist so that
+    # by the time the API reports status=completed, the upload doc is
+    # already at its final shape — frontend / tests / users will not see
+    # a stale snapshot during the brief window between persist and consume.
+    consume_upload_ids: List[str] = []
+    if db is not None:
+        try:
+            jr = await db.real_user_traffic_jobs.find_one(
                 {"job_id": job_id},
-                {"_id": 0, "consume_upload_ids": 1, "user_id": 1,
-                 "used_proxy_raws": 1, "used_ua_strings": 1,
-                 "pending_leads_path": 1},
+                {"_id": 0, "consume_upload_ids": 1, "user_id": 1, "pending_leads_path": 1},
             )
-            if job_record:
-                upload_ids = job_record.get("consume_upload_ids") or []
-                uid = job_record.get("user_id")
-                if upload_ids and uid:
+            if jr:
+                consume_upload_ids = jr.get("consume_upload_ids") or []
+                uid = jr.get("user_id")
+                if consume_upload_ids and uid:
                     try:
-                        from server import _consume_uploads  # avoid top-level cycle
+                        from server import _consume_uploads
                         await _consume_uploads(
                             uid,
-                            upload_ids,
-                            used_proxy_raws=job_record.get("used_proxy_raws") or [],
-                            used_ua_strings=job_record.get("used_ua_strings") or [],
-                            pending_leads_path=job_record.get("pending_leads_path") or "",
+                            consume_upload_ids,
+                            used_proxy_raws=list(used_proxy_set),
+                            used_ua_strings=list(used_ua_set),
+                            pending_leads_path=jr.get("pending_leads_path") or "",
                         )
-                        # Clear the consume list so we don't double-process
-                        await db.real_user_traffic_jobs.update_one(
-                            {"job_id": job_id},
-                            {"$set": {"consume_upload_ids": [], "consumed_upload_ids_final": upload_ids}},
+                        logger.info(
+                            f"RUT job {job_id}: pruned {len(consume_upload_ids)} uploaded batch(es) — "
+                            f"removed {len(used_proxy_set)} used proxies, "
+                            f"{len(used_ua_set)} used UAs (live + safety-net pass)"
                         )
-                        logger.info(f"RUT job {job_id}: pruned {len(upload_ids)} uploaded batch(es) — "
-                                    f"removed {len(job_record.get('used_proxy_raws') or [])} used proxies, "
-                                    f"{len(job_record.get('used_ua_strings') or [])} used UAs")
                     except Exception as e:
                         logger.warning(f"RUT job {job_id}: upload consume failed: {e}")
-    except Exception as e:
-        logger.warning(f"RUT job {job_id}: post-finish upload consume hook failed: {e}")
+        except Exception as e:
+            logger.warning(f"RUT job {job_id}: pre-persist consume hook failed: {e}")
+
+    if db is not None:
+        # Mark consume IDs as cleared so we don't double-process later.
+        if consume_upload_ids:
+            RUT_JOBS[job_id]["consume_upload_ids"] = []
+            RUT_JOBS[job_id]["consumed_upload_ids_final"] = consume_upload_ids
+        await _persist(db, job_id)
 
 
 # ──────────────────────────────────────────────────────────────────

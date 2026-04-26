@@ -10413,6 +10413,7 @@ async def _consume_uploads(
                         {"$set": {
                             "items": remaining,
                             "count": len(remaining),
+                            "item_count": len(remaining),
                             "updated_at": now_iso,
                         }},
                     )
@@ -10430,6 +10431,7 @@ async def _consume_uploads(
                         {"$set": {
                             "items": remaining,
                             "count": len(remaining),
+                            "item_count": len(remaining),
                             "updated_at": now_iso,
                         }},
                     )
