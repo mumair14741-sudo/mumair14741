@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────
-#  TrackMaster — docker-compose for local development / self-host
+#  RealFlow — docker-compose for local development / self-host
 #
 #  Services:
 #    • mongo      → MongoDB 7, data persisted in a named volume
@@ -19,7 +19,7 @@ services:
   # ─── MongoDB ──────────────────────────────────────────────
   mongo:
     image: mongo:7
-    container_name: trackmaster-mongo
+    container_name: realflow-mongo
     restart: unless-stopped
     volumes:
       - mongo_data:/data/db
@@ -31,25 +31,25 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
-    networks: [trackmaster-net]
+    networks: [realflow-net]
 
   # ─── Backend (FastAPI + Playwright) ───────────────────────
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: trackmaster-backend
+    container_name: realflow-backend
     restart: unless-stopped
     depends_on:
       mongo:
         condition: service_healthy
     environment:
       MONGO_URL: "mongodb://mongo:27017"
-      DB_NAME: "${DB_NAME:-trackmaster}"
+      DB_NAME: "${DB_NAME:-realflow}"
       CORS_ORIGINS: "${CORS_ORIGINS:-*}"
       JWT_SECRET_KEY: "${JWT_SECRET_KEY:-change-me-in-production}"
       POSTBACK_TOKEN: "${POSTBACK_TOKEN:-change-me-postback-token}"
-      ADMIN_EMAIL: "${ADMIN_EMAIL:-admin@trackmaster.local}"
+      ADMIN_EMAIL: "${ADMIN_EMAIL:-admin@realflow.local}"
       ADMIN_PASSWORD: "${ADMIN_PASSWORD:-admin123}"
       APP_URL: "${APP_URL:-http://localhost:3000}"
       # Optional — leave empty to disable email / use alternate providers
@@ -72,7 +72,7 @@ services:
       timeout: 5s
       retries: 5
       start_period: 60s
-    networks: [trackmaster-net]
+    networks: [realflow-net]
 
   # ─── Frontend (React build + nginx) ───────────────────────
   frontend:
@@ -83,13 +83,13 @@ services:
         # Leave empty → frontend hits same origin (nginx proxies /api → backend).
         # This is the easiest setup and works for any host.
         REACT_APP_BACKEND_URL: ""
-    container_name: trackmaster-frontend
+    container_name: realflow-frontend
     restart: unless-stopped
     depends_on:
       - backend
     ports:
       - "${FRONTEND_PORT:-3000}:80"
-    networks: [trackmaster-net]
+    networks: [realflow-net]
 
 # ─── Volumes ────────────────────────────────────────────────
 volumes:
@@ -99,5 +99,5 @@ volumes:
 
 # ─── Networks ───────────────────────────────────────────────
 networks:
-  trackmaster-net:
+  realflow-net:
     driver: bridge

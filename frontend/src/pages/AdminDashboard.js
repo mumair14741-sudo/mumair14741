@@ -52,8 +52,8 @@ export default function AdminDashboard() {
   const [showPassword, setShowPassword] = useState(false);
   const [activeTab, setActiveTab] = useState("users");
   const [branding, setBranding] = useState({
-    app_name: "TrackMaster",
-    tagline: "Traffic Tracking & Link Management System",
+    app_name: "RealFlow",
+    tagline: "Real Users. Real Results.",
     logo_url: "",
     favicon_url: "",
     primary_color: "#3B82F6",
@@ -590,7 +590,7 @@ export default function AdminDashboard() {
           <div className="flex items-center gap-3">
             <Shield className="w-8 h-8 text-[#EF4444]" />
             <div>
-              <h1 className="text-xl font-bold text-white">TrackMaster Admin</h1>
+              <h1 className="text-xl font-bold text-white">RealFlow Admin</h1>
               <p className="text-xs text-[#A1A1AA]">System Administration</p>
             </div>
           </div>
@@ -1065,7 +1065,7 @@ export default function AdminDashboard() {
                         id="app_name"
                         value={branding.app_name}
                         onChange={(e) => handleBrandingChange("app_name", e.target.value)}
-                        placeholder="TrackMaster"
+                        placeholder="RealFlow"
                         className="bg-[#18181B] border-[#27272A]"
                         data-testid="branding-app-name"
                       />
@@ -1099,7 +1099,7 @@ export default function AdminDashboard() {
                         id="footer_text"
                         value={branding.footer_text}
                         onChange={(e) => handleBrandingChange("footer_text", e.target.value)}
-                        placeholder="© 2026 TrackMaster. All rights reserved."
+                        placeholder="© 2026 RealFlow. All rights reserved."
                         className="bg-[#18181B] border-[#27272A]"
                         data-testid="branding-footer-text"
                       />
@@ -1406,7 +1406,7 @@ export default function AdminDashboard() {
                         </div>
                       )}
                       <div>
-                        <h4 className="font-bold text-white">{branding.app_name || "TrackMaster"}</h4>
+                        <h4 className="font-bold text-white">{branding.app_name || "RealFlow"}</h4>
                         <p className="text-xs text-[#A1A1AA]">{branding.tagline || "Traffic Tracking"}</p>
                       </div>
                     </div>
@@ -1426,7 +1426,7 @@ export default function AdminDashboard() {
                         Secondary Button
                       </Button>
                     </div>
-                    <p className="text-xs text-[#52525B] mt-4">{branding.footer_text || "© 2026 TrackMaster. All rights reserved."}</p>
+                    <p className="text-xs text-[#52525B] mt-4">{branding.footer_text || "© 2026 RealFlow. All rights reserved."}</p>
                   </div>
                 </div>
               </CardContent>

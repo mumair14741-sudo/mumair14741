@@ -51,7 +51,7 @@ LOGIN DETAILS
 ---------------------------------------------------------------
 
 URL       : http://localhost:3000
-Email     : admin@trackmaster.local
+Email     : admin@realflow.local
 Password  : admin123
 
 (Ye .env file mein hain. Aap change kar sakte hain.)

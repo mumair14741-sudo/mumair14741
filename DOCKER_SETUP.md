@@ -1,6 +1,6 @@
-# TrackMaster — Localhost Docker Setup Guide
+# RealFlow — Localhost Docker Setup Guide
 
-Ye guide aapko TrackMaster ko apne **Windows / macOS / Linux** computer par Docker ke through chalane mein help karegi — ek bhi dependency manually install nahi karni parti.
+Ye guide aapko RealFlow ko apne **Windows / macOS / Linux** computer par Docker ke through chalane mein help karegi — ek bhi dependency manually install nahi karni parti.
 
 ---
 
@@ -80,7 +80,7 @@ Browser mein jao: **<http://localhost:3000>**
 
 ### 2.5 — Sab theek chal raha hai verify karein
 
-1. **MongoDB up**: `docker compose ps` mein `trackmaster-mongo` = `healthy`
+1. **MongoDB up**: `docker compose ps` mein `realflow-mongo` = `healthy`
 2. **Backend up**: `curl http://localhost:3000/health` → `{"status":"ok",...}`
 3. **Frontend up**: browser mein `http://localhost:3000` khule
 4. **Admin System Check**: login → Admin Dashboard → **"System Check"** tab. Sab green badges dikhne chahiye (sirf Email green nahi hoga agar SMTP/Resend set nahi kiya — normal hai).
@@ -113,7 +113,7 @@ Docker named volumes mein — container delete karne par bhi **safe** rahti hai:
 
 Volumes list karne ke liye:
 ```bash
-docker volume ls | grep trackmaster
+docker volume ls | grep realflow
 ```
 
 ⚠ `docker compose down -v` chalane par saara data delete ho jayega. Sirf `down` chalana safe hai.
@@ -203,7 +203,7 @@ Localhost ke liye ye setup perfect hai. Internet par expose karna ho toh:
 2. Apne domain ka SSL chahiye → **Caddy** ya **Traefik** reverse proxy add kar dein (Let's Encrypt free SSL)
 3. `CORS_ORIGINS=https://your-domain.com` (sirf apna domain)
 4. MongoDB ke liye authenticated user banayen (default open-local-only safe hai, public exposure nahi karna)
-5. Backup regular lein: `docker exec trackmaster-mongo mongodump --archive=/tmp/b.archive && docker cp trackmaster-mongo:/tmp/b.archive ./backup-$(date +%F).archive`
+5. Backup regular lein: `docker exec realflow-mongo mongodump --archive=/tmp/b.archive && docker cp realflow-mongo:/tmp/b.archive ./backup-$(date +%F).archive`
 
 ---
 

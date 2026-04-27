@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════
-#   TrackMaster — 1-Click Installer for Mac / Linux
+#   RealFlow — 1-Click Installer for Mac / Linux
 #   Run: bash install-mac-linux.sh
 #   Ya:  chmod +x install-mac-linux.sh && ./install-mac-linux.sh
 # ═══════════════════════════════════════════════════════════════
@@ -11,7 +11,7 @@ G="\033[0;32m"; R="\033[0;31m"; Y="\033[1;33m"; C="\033[0;36m"; N="\033[0m"
 
 clear
 echo -e "${C}═══════════════════════════════════════════════════════════════${N}"
-echo -e "${C}  TrackMaster — 1-Click Installer${N}"
+echo -e "${C}  RealFlow — 1-Click Installer${N}"
 echo -e "${C}═══════════════════════════════════════════════════════════════${N}"
 echo ""
 
@@ -63,7 +63,7 @@ if [ ! -f ".env" ]; then
     echo -e "      ${G}.env file ban gayi, random secrets set ho gaye.${N}"
     echo ""
     echo -e "${Y}  NOTE: Default admin login:${N}"
-    echo "    Email:    admin@trackmaster.local"
+    echo "    Email:    admin@realflow.local"
     echo "    Password: admin123"
     echo ""
     echo -e "${Y}  Security ke liye .env file mein ADMIN_EMAIL aur${N}"
@@ -112,7 +112,7 @@ fi
 echo ""
 
 echo -e "${G}═══════════════════════════════════════════════════════════════${N}"
-echo -e "${G}  TrackMaster chal raha hai!${N}"
+echo -e "${G}  RealFlow chal raha hai!${N}"
 echo -e "${G}═══════════════════════════════════════════════════════════════${N}"
 echo ""
 echo "  URL:             $URL"

@@ -1,16 +1,16 @@
 @echo off
 REM ===============================================================
-REM   TrackMaster - 1-Click Installer (Windows)
+REM   RealFlow - 1-Click Installer (Windows)
 REM   Self-contained - .env khud create karega.
 REM ===============================================================
 
 chcp 65001 >nul 2>&1
-title TrackMaster Installer
+title RealFlow Installer
 cd /d "%~dp0"
 
 echo.
 echo ===============================================================
-echo       TrackMaster - 1-Click Installer
+echo       RealFlow - 1-Click Installer
 echo ===============================================================
 echo.
 
@@ -76,11 +76,11 @@ if exist ".env" (
     ) else (
         REM Example file missing - generate a fresh .env with defaults.
         (
-            echo DB_NAME=trackmaster
+            echo DB_NAME=realflow
             echo FRONTEND_PORT=3000
             echo APP_URL=http://localhost:3000
             echo CORS_ORIGINS=*
-            echo ADMIN_EMAIL=admin@trackmaster.local
+            echo ADMIN_EMAIL=admin@realflow.local
             echo ADMIN_PASSWORD=admin123
             echo JWT_SECRET_KEY=change-me-to-a-long-random-string
             echo POSTBACK_TOKEN=change-me-to-a-long-random-string
@@ -146,10 +146,10 @@ start "" "http://localhost:3000"
 
 echo.
 echo ===============================================================
-echo     DONE! TrackMaster chal raha hai.
+echo     DONE! RealFlow chal raha hai.
 echo ===============================================================
 echo       URL:        http://localhost:3000
-echo       Email:      admin@trackmaster.local
+echo       Email:      admin@realflow.local
 echo       Password:   admin123
 echo.
 echo     Stop:     docker compose down

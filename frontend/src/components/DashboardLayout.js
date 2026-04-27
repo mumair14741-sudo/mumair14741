@@ -4,6 +4,7 @@ import { LayoutDashboard, Link2, MousePointerClick, DollarSign, Server, Menu, Lo
 import { Button } from "./ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { useBranding } from "../context/BrandingContext";
+import ThemeToggle from "./ThemeToggle";
 import axios from "axios";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -123,7 +124,7 @@ export default function DashboardLayout({ children }) {
             branding.logo_url ? (
               <img src={branding.logo_url} alt={branding.app_name} className="h-8 object-contain" data-testid="app-logo" />
             ) : (
-              <h1 className="text-xl font-bold" style={{ color: 'var(--brand-text)' }} data-testid="app-logo">{branding.app_name || "TrackMaster"}</h1>
+              <h1 className="text-xl font-bold" style={{ color: 'var(--brand-text)' }} data-testid="app-logo">{branding.app_name || "RealFlow"}</h1>
             )
           )}
           <Button
@@ -177,7 +178,9 @@ export default function DashboardLayout({ children }) {
             </h2>
           </div>
 
-          <DropdownMenu>
+          <div className="flex items-center gap-2">
+            <ThemeToggle />
+            <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="flex items-center gap-2" data-testid="user-menu">
                 <div 
@@ -203,6 +206,7 @@ export default function DashboardLayout({ children }) {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          </div>
         </header>
 
         <main className="flex-1 overflow-auto p-6" data-testid="main-content">

@@ -83,7 +83,7 @@ const TRAFFIC_SOURCE_OPTIONS = [
 
 // Referrer mode options
 const REFERRER_MODE_OPTIONS = [
-  { value: "normal", label: "Normal (TrackMaster as referrer)", description: "Destination sees your tracking domain" },
+  { value: "normal", label: "Normal (RealFlow as referrer)", description: "Destination sees your tracking domain" },
   { value: "no_referrer", label: "No Referrer (Blank/Direct)", description: "Destination sees direct traffic" },
   { value: "with_params", label: "Add Source Parameters", description: "Add utm_source, fbclid, etc. to URL" },
 ];

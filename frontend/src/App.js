@@ -24,6 +24,7 @@ import AdminLoginPage from "./pages/AdminLoginPage";
 import AdminDashboard from "./pages/AdminDashboard";
 import { Toaster } from "./components/ui/sonner";
 import { BrandingProvider } from "./context/BrandingContext";
+import { ThemeProvider } from "./context/ThemeContext";
 
 function PrivateRoute({ children }) {
   const token = localStorage.getItem("token");
@@ -76,7 +77,8 @@ function FeatureRoute({ children, feature }) {
 function App() {
   return (
     <BrandingProvider>
-      <div className="App">
+      <ThemeProvider>
+        <div className="App">
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
@@ -174,6 +176,7 @@ function App() {
         </BrowserRouter>
         <Toaster position="bottom-left" />
       </div>
+      </ThemeProvider>
     </BrandingProvider>
   );
 }

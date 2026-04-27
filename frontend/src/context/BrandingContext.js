@@ -5,8 +5,8 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
 
 const DEFAULT_BRANDING = {
-  app_name: "TrackMaster",
-  tagline: "Traffic Tracking & Link Management System",
+  app_name: "RealFlow",
+  tagline: "Real Users. Real Results.",
   logo_url: "",
   favicon_url: "",
   primary_color: "#3B82F6",
@@ -22,7 +22,7 @@ const DEFAULT_BRANDING = {
   muted_color: "#A1A1AA",
   login_bg_url: "",
   admin_email: "",
-  footer_text: "© 2026 TrackMaster. All rights reserved.",
+  footer_text: "© 2026 RealFlow. All rights reserved.",
   sidebar_style: "dark",
   button_style: "rounded",
   font_family: "Inter"

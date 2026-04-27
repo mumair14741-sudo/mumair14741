@@ -1053,7 +1053,7 @@ async def run_real_user_traffic_job(
         _live_proxy_pulled.add(raw)
         try:
             client = db.client
-            user_db = client[f"trackmaster_user_{user_db_truncated}"]
+            user_db = client[f"realflow_user_{user_db_truncated}"]
             res = await user_db["uploaded_resources"].update_one(
                 {"id": upload_proxy_id, "user_id": engine_user_id, "type": "proxies"},
                 {
@@ -1083,7 +1083,7 @@ async def run_real_user_traffic_job(
         _live_ua_pulled.add(ua)
         try:
             client = db.client
-            user_db = client[f"trackmaster_user_{user_db_truncated}"]
+            user_db = client[f"realflow_user_{user_db_truncated}"]
             res = await user_db["uploaded_resources"].update_one(
                 {"id": upload_ua_id, "user_id": engine_user_id, "type": "user_agents"},
                 {
@@ -1114,7 +1114,7 @@ async def run_real_user_traffic_job(
         async with _data_file_lock:
             try:
                 client = db.client
-                user_db = client[f"trackmaster_user_{user_db_truncated}"]
+                user_db = client[f"realflow_user_{user_db_truncated}"]
                 doc = await user_db["uploaded_resources"].find_one(
                     {"id": upload_data_file_id, "user_id": engine_user_id, "type": "data_file"},
                     {"_id": 0, "file_path": 1, "items": 1},
@@ -2626,13 +2626,13 @@ async def _log_click_for_link(entry: Dict[str, Any], job_info: Dict[str, Any], m
         # Access the per-user DB on the same client. IMPORTANT: Must match
         # server.py::get_user_db() exactly — that helper uses a 20-char
         # truncated, underscore-normalised key:
-        #     f"trackmaster_user_{user_id.replace('-', '_')[:20]}"
+        #     f"realflow_user_{user_id.replace('-', '_')[:20]}"
         # If we use the raw owner_id (with hyphens) here, the click docs go
         # into a SEPARATE database and the dashboard / Clicks page reads
         # from the truncated DB and sees ZERO clicks — exactly the bug
         # users have reported ("tracker link use kia pr click count nahi hoa").
         client = main_db.client
-        db_name = f"trackmaster_user_{owner_id.replace('-', '_')[:20]}"
+        db_name = f"realflow_user_{owner_id.replace('-', '_')[:20]}"
         user_db = client[db_name]
 
         exit_ip = (entry.get("exit_ip") or "").strip()

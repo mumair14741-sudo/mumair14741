@@ -49,7 +49,7 @@ export default function AdminLoginPage() {
             <Shield className="w-10 h-10 text-[#EF4444]" />
             <h1 className="text-3xl font-bold text-white">Admin Panel</h1>
           </div>
-          <p className="text-[#A1A1AA]">TrackMaster Administration</p>
+          <p className="text-[#A1A1AA]">RealFlow Administration</p>
         </div>
 
         <Card className="bg-[#09090B]/90 border-[#27272A] backdrop-blur-lg">

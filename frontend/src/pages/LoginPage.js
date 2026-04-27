@@ -9,6 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { toast } from "sonner";
 import { Eye, EyeOff, Shield, Mail } from "lucide-react";
 import { useBranding } from "../context/BrandingContext";
+import ThemeToggle from "../components/ThemeToggle";
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 const API = `${BACKEND_URL}/api`;
@@ -75,17 +76,20 @@ export default function LoginPage() {
       }}
     >
       <div className="absolute inset-0 bg-black/70"></div>
+      <div className="absolute top-4 right-4 z-20">
+        <ThemeToggle />
+      </div>
       <div className="relative z-10 w-full max-w-md">
         <div className="text-center mb-8">
           {branding.logo_url ? (
             <img src={branding.logo_url} alt={branding.app_name} className="h-16 mx-auto mb-4 object-contain" />
           ) : (
-            <h1 className="text-4xl font-bold text-white mb-2" data-testid="app-title">{branding.app_name || "TrackMaster"}</h1>
+            <h1 className="text-4xl font-bold text-white mb-2" data-testid="app-title">{branding.app_name || "RealFlow"}</h1>
           )}
-          <p className="text-muted-foreground">{branding.tagline || "Traffic Tracking & Link Management System"}</p>
+          <p className="text-muted-foreground">{branding.tagline || "Real Users. Real Results."}</p>
         </div>
 
-        <Card className="backdrop-blur-sm" style={{ backgroundColor: 'rgba(9, 9, 11, 0.9)', borderColor: 'var(--brand-border)' }}>
+        <Card className="backdrop-blur-sm" style={{ backgroundColor: 'color-mix(in srgb, var(--brand-card) 90%, transparent)', borderColor: 'var(--brand-border)' }}>
           <CardHeader>
             <CardTitle style={{ color: 'var(--brand-text)' }}>Welcome</CardTitle>
             <CardDescription>Sign in to your account or create a new one</CardDescription>
@@ -252,7 +256,7 @@ export default function LoginPage() {
         </Card>
         
         {/* Footer */}
-        <p className="text-center text-xs text-[#52525B] mt-6">{branding.footer_text || "© 2026 TrackMaster. All rights reserved."}</p>
+        <p className="text-center text-xs text-[#52525B] mt-6">{branding.footer_text || "© 2026 RealFlow. All rights reserved."}</p>
       </div>
     </div>
   );
