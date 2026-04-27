@@ -235,14 +235,28 @@ if (Test-Path $certPath) {
 
 # 4.2 - Create tunnel (idempotent)
 Write-Step "Checking tunnel 'realflow'..."
-$tunnelList = & cloudflared tunnel list --output json 2>$null | ConvertFrom-Json
+
+# Helper: cloudflared sometimes prints a version-warning JSON line before
+# the actual tunnel list. Capture raw output and extract only the JSON array.
+function Get-CloudflareTunnels {
+    $raw = & cloudflared --no-autoupdate tunnel list --output json 2>&1 | Out-String
+    $start = $raw.IndexOf('[')
+    $end   = $raw.LastIndexOf(']')
+    if ($start -ge 0 -and $end -gt $start) {
+        try { return ($raw.Substring($start, $end - $start + 1) | ConvertFrom-Json) }
+        catch { return @() }
+    }
+    return @()
+}
+
+$tunnelList = Get-CloudflareTunnels
 $tunnel = $tunnelList | Where-Object { $_.name -eq "realflow" } | Select-Object -First 1
 if ($tunnel) {
     Write-Skip "Tunnel 'realflow' already exists (id: $($tunnel.id))"
 } else {
     Write-Step "Creating tunnel 'realflow'..."
-    & cloudflared tunnel create realflow | Out-Null
-    $tunnelList = & cloudflared tunnel list --output json 2>$null | ConvertFrom-Json
+    & cloudflared --no-autoupdate tunnel create realflow 2>&1 | Out-Null
+    $tunnelList = Get-CloudflareTunnels
     $tunnel = $tunnelList | Where-Object { $_.name -eq "realflow" } | Select-Object -First 1
     if (-not $tunnel) { Write-Err "Failed to create tunnel"; exit 1 }
     Write-OK "Tunnel created (id: $($tunnel.id))"
@@ -270,7 +284,7 @@ Write-OK "Tunnel config written"
 
 # 4.4 - DNS route (idempotent - ignores "already exists" error)
 Write-Step "Routing api.$Domain -> tunnel..."
-& cloudflared tunnel route dns realflow "api.$Domain" 2>&1 | ForEach-Object {
+& cloudflared --no-autoupdate tunnel route dns realflow "api.$Domain" 2>&1 | ForEach-Object {
     if ($_ -match "already exists|record already") {
         Write-Skip "DNS record already exists"
     } else {
