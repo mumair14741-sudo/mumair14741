@@ -1245,6 +1245,70 @@ async def run_real_user_traffic_job(
         state_rr[state_code] = start_ptr
         return None
 
+    # ── Resilient shared-browser holder ─────────────────────────────
+    # Chromium occasionally crashes mid-job under heavy concurrency or
+    # when a misbehaving proxy forces it to tear down. When that happens
+    # every subsequent `browser.new_context(...)` throws
+    # `TargetClosedError: Target page, context or browser has been closed`
+    # and the whole job "fails" with 0 conversions. This holder wraps the
+    # shared browser so workers can lazily relaunch it behind an async
+    # lock if it ever drops offline.
+    _browser_holder: Dict[str, Any] = {"b": None, "pw": None}
+    _browser_lock = asyncio.Lock()
+
+    async def _get_live_browser() -> Browser:
+        """Return a live Playwright Browser — relaunches on the fly if the
+        shared instance crashed / got disconnected. Safe to call from many
+        concurrent workers (serialised via _browser_lock)."""
+        b = _browser_holder.get("b")
+        if b is not None:
+            try:
+                if b.is_connected():
+                    return b
+            except Exception:
+                pass
+        # Browser missing or disconnected — relaunch under lock.
+        async with _browser_lock:
+            b = _browser_holder.get("b")
+            if b is not None:
+                try:
+                    if b.is_connected():
+                        return b
+                except Exception:
+                    pass
+            pw = _browser_holder.get("pw")
+            if pw is None:
+                # No Playwright runtime yet — create one.
+                pw_cm_local = async_playwright()
+                pw = await pw_cm_local.__aenter__()
+                _browser_holder["pw"] = pw
+                _browser_holder["pw_cm"] = pw_cm_local
+            logger.warning(
+                f"RUT job {job_id}: shared Chromium unavailable — relaunching…"
+            )
+            try:
+                push_live_step(job_id, 0, "engine", "info",
+                               "Chromium crashed — relaunching…")
+            except Exception:
+                pass
+            new_b = await pw.chromium.launch(
+                headless=True,
+                args=[
+                    "--no-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-features=WebRtcHideLocalIpsWithMdns,AutomationControlled",
+                    "--disable-blink-features=AutomationControlled",
+                    "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+                ],
+            )
+            _browser_holder["b"] = new_b
+            try:
+                push_live_step(job_id, 0, "engine", "ok",
+                               "Chromium relaunched — resuming visits")
+            except Exception:
+                pass
+            return new_b
+
     async def process_one(i: int, shared_browser: Browser):
         # Short-circuit if user pressed Stop — don't waste a proxy/UA on it
         if cancel_event.is_set():
@@ -1397,24 +1461,55 @@ async def run_real_user_traffic_job(
             # all overridden per-context via init script). This drops RAM
             # usage 5-10x vs. per-visit Chromium launches and lets us safely
             # run 15+ concurrent visits without OOM.
-            browser = shared_browser
-            context = await browser.new_context(
-                proxy={
-                    "server": proxy["server"],
-                    **({"username": proxy["username"]} if proxy.get("username") else {}),
-                    **({"password": proxy["password"]} if proxy.get("password") else {}),
-                },
-                user_agent=ua,
-                viewport=fp["viewport"],
-                device_scale_factor=fp["device_scale_factor"],
-                is_mobile=fp["is_mobile"],
-                has_touch=fp["has_touch"],
-                locale=geo["locale"],
-                timezone_id=geo["timezone"],
-                geolocation={"latitude": geo["lat"], "longitude": geo["lon"]},
-                permissions=["geolocation"],
-                extra_http_headers={"Accept-Language": geo["accept_language"]},
-            )
+            # NOTE: `_get_live_browser()` transparently relaunches Chromium
+            # if it has crashed since the last visit — prevents the entire
+            # job from failing with `TargetClosedError` the moment one
+            # bad proxy or a Chromium bug kills the shared instance.
+            browser = await _get_live_browser()
+            try:
+                context = await browser.new_context(
+                    proxy={
+                        "server": proxy["server"],
+                        **({"username": proxy["username"]} if proxy.get("username") else {}),
+                        **({"password": proxy["password"]} if proxy.get("password") else {}),
+                    },
+                    user_agent=ua,
+                    viewport=fp["viewport"],
+                    device_scale_factor=fp["device_scale_factor"],
+                    is_mobile=fp["is_mobile"],
+                    has_touch=fp["has_touch"],
+                    locale=geo["locale"],
+                    timezone_id=geo["timezone"],
+                    geolocation={"latitude": geo["lat"], "longitude": geo["lon"]},
+                    permissions=["geolocation"],
+                    extra_http_headers={"Accept-Language": geo["accept_language"]},
+                )
+            except Exception as _nce:
+                # new_context can still race with a crash that happened
+                # between is_connected() and the call. Give the holder one
+                # last chance to relaunch, then retry the context.
+                msg = str(_nce)
+                if ("closed" in msg.lower()) or ("TargetClosed" in type(_nce).__name__):
+                    browser = await _get_live_browser()
+                    context = await browser.new_context(
+                        proxy={
+                            "server": proxy["server"],
+                            **({"username": proxy["username"]} if proxy.get("username") else {}),
+                            **({"password": proxy["password"]} if proxy.get("password") else {}),
+                        },
+                        user_agent=ua,
+                        viewport=fp["viewport"],
+                        device_scale_factor=fp["device_scale_factor"],
+                        is_mobile=fp["is_mobile"],
+                        has_touch=fp["has_touch"],
+                        locale=geo["locale"],
+                        timezone_id=geo["timezone"],
+                        geolocation={"latitude": geo["lat"], "longitude": geo["lon"]},
+                        permissions=["geolocation"],
+                        extra_http_headers={"Accept-Language": geo["accept_language"]},
+                    )
+                else:
+                    raise
             await context.add_init_script(_build_stealth_script(fp, geo))
 
             if True:
@@ -1819,8 +1914,13 @@ async def run_real_user_traffic_job(
     # own cookies, storage, proxy, fingerprint and is undetectable from
     # the website's side. RAM cost drops 5-10x vs. per-visit launches,
     # which lets concurrency=15 run safely in the pod.
+    # NOTE: The browser + Playwright handle are stashed in `_browser_holder`
+    # so `_get_live_browser()` can transparently relaunch Chromium if it
+    # ever crashes mid-job (prevents the TargetClosedError death-spiral).
     pw_cm = async_playwright()
     pw = await pw_cm.__aenter__()
+    _browser_holder["pw"] = pw
+    _browser_holder["pw_cm"] = pw_cm
     shared_browser: Optional[Browser] = None
     try:
         shared_browser = await pw.chromium.launch(
@@ -1833,6 +1933,7 @@ async def run_real_user_traffic_job(
                 "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
             ],
         )
+        _browser_holder["b"] = shared_browser
     except Exception as e:
         try:
             await pw_cm.__aexit__(type(e), e, None)
@@ -1921,15 +2022,24 @@ async def run_real_user_traffic_job(
             logger.warning(f"RUT gather error: {e}")
 
     # ── Close the shared browser & playwright runtime ────────────────
+    # Prefer the holder's current browser (may have been relaunched mid-job)
+    # over the original `shared_browser` variable.
+    final_browser = _browser_holder.get("b") or shared_browser
     try:
-        if shared_browser is not None:
-            await shared_browser.close()
+        if final_browser is not None:
+            await final_browser.close()
     except Exception as e:
         logger.debug(f"shared browser close failed: {e}")
+    # Use holder's pw_cm if present (in case _get_live_browser created a
+    # new one after the original pw_cm was discarded).
+    final_pw_cm = _browser_holder.get("pw_cm") or pw_cm
     try:
-        await pw_cm.__aexit__(None, None, None)
+        await final_pw_cm.__aexit__(None, None, None)
     except Exception as e:
         logger.debug(f"playwright runtime exit failed: {e}")
+    _browser_holder["b"] = None
+    _browser_holder["pw"] = None
+    _browser_holder["pw_cm"] = None
 
     # Remember whether Stop was pressed — used later to set final status
     was_cancelled = cancel_event.is_set()
