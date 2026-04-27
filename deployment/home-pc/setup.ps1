@@ -304,17 +304,38 @@ if ($dnsOut -match "already exists|record already") {
 }
 Write-OK "DNS routed"
 
-# 4.5 - Install as Windows service
+# 4.5 - Install as Windows service (using ProgramData, not user profile)
+# -----
+# IMPORTANT: cloudflared's Windows service runs as LOCAL SYSTEM, which
+# CANNOT read files in %USERPROFILE%\.cloudflared\. If we point the
+# service at user-profile paths, the tunnel silently fails to connect
+# (shows 'RUNNING' but returns HTTP 530 / Cloudflare error 1033).
+# Fix: copy cert/credentials/config to C:\ProgramData\Cloudflare\cloudflared\
+# and rewrite config.yml to use SYSTEM-readable paths BEFORE installing.
+Write-Step "Preparing SYSTEM-accessible tunnel config..."
+$sysDir = "C:\ProgramData\Cloudflare\cloudflared"
+New-Item -ItemType Directory -Force -Path $sysDir | Out-Null
+Get-ChildItem -Path $cfDir -File | ForEach-Object {
+    Copy-Item -Path $_.FullName -Destination $sysDir -Force
+}
+$sysConfigPath = Join-Path $sysDir "config.yml"
+$cfg = Get-Content $sysConfigPath -Raw
+$escUser = [regex]::Escape($cfDir)
+$cfg = $cfg -replace $escUser, $sysDir
+Set-Content -Path $sysConfigPath -Value $cfg -Encoding UTF8
+Write-OK "Tunnel config copied to $sysDir"
+
 Write-Step "Installing cloudflared as Windows service..."
 $svc = Get-Service cloudflared -ErrorAction SilentlyContinue
 if ($svc) {
     Write-Skip "cloudflared service already installed"
-    if ($svc.Status -ne "Running") {
-        Start-Service cloudflared
-        Write-OK "cloudflared service started"
-    }
+    # Restart to pick up any config change
+    Stop-Service cloudflared -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+    Start-Service cloudflared -ErrorAction SilentlyContinue
+    Write-OK "cloudflared service restarted"
 } else {
-    Invoke-Cloudflared "service" "install" | Out-Null
+    Invoke-Cloudflared "--config" $sysConfigPath "service" "install" | Out-Null
     Start-Sleep -Seconds 3
     Start-Service cloudflared -ErrorAction SilentlyContinue
     Write-OK "cloudflared service installed + started"
