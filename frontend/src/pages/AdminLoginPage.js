@@ -39,22 +39,25 @@ export default function AdminLoginPage() {
     <div 
       className="min-h-screen flex items-center justify-center p-4"
       style={{
-        background: "linear-gradient(135deg, #09090B 0%, #18181B 50%, #09090B 100%)"
+        backgroundColor: 'var(--brand-background)',
+        backgroundImage:
+          'radial-gradient(circle at 30% 20%, color-mix(in srgb, var(--brand-primary) 12%, transparent), transparent 60%), ' +
+          'radial-gradient(circle at 70% 80%, color-mix(in srgb, var(--brand-accent) 10%, transparent), transparent 60%)',
       }}
       data-testid="admin-login-page"
     >
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="flex items-center justify-center gap-2 mb-2">
-            <Shield className="w-10 h-10 text-[#EF4444]" />
-            <h1 className="text-3xl font-bold text-white">Admin Panel</h1>
+            <Shield className="w-10 h-10" style={{ color: 'var(--brand-danger)' }} />
+            <h1 className="text-3xl font-bold" style={{ color: 'var(--brand-text)' }}>Admin Panel</h1>
           </div>
-          <p className="text-[#A1A1AA]">RealFlow Administration</p>
+          <p style={{ color: 'var(--brand-muted)' }}>RealFlow Administration</p>
         </div>
 
-        <Card className="bg-[#09090B]/90 border-[#27272A] backdrop-blur-lg">
+        <Card style={{ backgroundColor: 'color-mix(in srgb, var(--brand-card) 90%, transparent)', borderColor: 'var(--brand-border)' }} className="backdrop-blur-lg">
           <CardHeader>
-            <CardTitle className="text-white">Admin Login</CardTitle>
+            <CardTitle style={{ color: 'var(--brand-text)' }}>Admin Login</CardTitle>
             <CardDescription>Access the administration dashboard</CardDescription>
           </CardHeader>
           <CardContent>

@@ -68,14 +68,26 @@ export default function LoginPage() {
 
   return (
     <div
-      className="min-h-screen flex items-center justify-center p-4"
-      style={{
-        backgroundImage: branding.login_bg_url ? `url('${branding.login_bg_url}')` : `url('https://images.unsplash.com/photo-1762279388956-1c098163a2a8?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA3MDR8MHwxfHNlYXJjaHwyfHxhYnN0cmFjdCUyMGRpZ2l0YWwlMjBkYXRhJTIwZmxvdyUyMGRhcmslMjBiYWNrZ3JvdW5kfGVufDB8fHx8MTc3MDE0Nzg2Nnww&ixlib=rb-4.1.0&q=85')`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-      }}
+      className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden"
+      style={
+        branding.login_bg_url
+          ? {
+              backgroundImage: `url('${branding.login_bg_url}')`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+            }
+          : {
+              backgroundColor: 'var(--brand-background)',
+              backgroundImage:
+                'radial-gradient(circle at 20% 10%, color-mix(in srgb, var(--brand-primary) 14%, transparent), transparent 55%), ' +
+                'radial-gradient(circle at 85% 90%, color-mix(in srgb, var(--brand-accent) 12%, transparent), transparent 55%)',
+            }
+      }
     >
-      <div className="absolute inset-0 bg-black/70"></div>
+      {/* Soft overlay only if a custom image background is set */}
+      {branding.login_bg_url && (
+        <div className="absolute inset-0 bg-black/60"></div>
+      )}
       <div className="absolute top-4 right-4 z-20">
         <ThemeToggle />
       </div>
@@ -84,9 +96,9 @@ export default function LoginPage() {
           {branding.logo_url ? (
             <img src={branding.logo_url} alt={branding.app_name} className="h-16 mx-auto mb-4 object-contain" />
           ) : (
-            <h1 className="text-4xl font-bold text-white mb-2" data-testid="app-title">{branding.app_name || "RealFlow"}</h1>
+            <h1 className="text-4xl font-bold mb-2" style={{ color: 'var(--brand-text)' }} data-testid="app-title">{branding.app_name || "RealFlow"}</h1>
           )}
-          <p className="text-muted-foreground">{branding.tagline || "Real Users. Real Results."}</p>
+          <p style={{ color: 'var(--brand-muted)' }}>{branding.tagline || "Real Users. Real Results."}</p>
         </div>
 
         <Card className="backdrop-blur-sm" style={{ backgroundColor: 'color-mix(in srgb, var(--brand-card) 90%, transparent)', borderColor: 'var(--brand-border)' }}>
