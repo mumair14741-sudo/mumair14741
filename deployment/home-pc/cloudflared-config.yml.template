@@ -1,0 +1,31 @@
+# ============================================================
+#  Cloudflare Tunnel config for RealFlow
+#  Save as:  C:\Users\<YourName>\.cloudflared\config.yml
+#  (Windows will show ".cloudflared" as a hidden folder — you
+#  may need to create it manually.)
+#
+#  Before using:
+#    1. Run `cloudflared tunnel login` (authorizes realflow.online)
+#    2. Run `cloudflared tunnel create realflow`
+#    3. Replace <YourName> and <TUNNEL-UUID> below
+#    4. Run `cloudflared tunnel route dns realflow api.realflow.online`
+#    5. Run `cloudflared service install`  (auto-start on boot)
+# ============================================================
+
+tunnel: realflow
+credentials-file: C:\Users\<YourName>\.cloudflared\<TUNNEL-UUID>.json
+
+ingress:
+  # API traffic → backend running on home PC port 8001
+  - hostname: api.realflow.online
+    service: http://localhost:8001
+    originRequest:
+      connectTimeout: 30s
+      noTLSVerify: true
+      # Keep websocket alive (needed for live click updates)
+      keepAliveTimeout: 90s
+      # Allow big file uploads (Excel leads, branding images)
+      httpHostHeader: api.realflow.online
+
+  # Everything else → 404
+  - service: http_status:404

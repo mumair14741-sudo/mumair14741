@@ -1,17 +1,27 @@
 # ─────────────────────────────────────────────────────────────
-#  RealFlow — docker-compose for local development / self-host
+#  RealFlow — docker-compose for self-hosted backend
+#
+#  Production (recommended):
+#    Frontend → Vercel (https://realflow.online)
+#    Backend + MongoDB → this compose stack on your home PC,
+#    exposed to the internet via Cloudflare Tunnel (api.realflow.online).
 #
 #  Services:
 #    • mongo      → MongoDB 7, data persisted in a named volume
-#    • backend    → FastAPI + Playwright (port 8001 internal)
-#    • frontend   → React build served via nginx (exposed on host :3000)
+#    • backend    → FastAPI + Playwright (exposed on 127.0.0.1:8001)
+#    • frontend   → [optional, profile=local-frontend] only for local testing
 #
-#  Quick start:
-#    1. cp .env.docker.example .env.docker   # or just keep defaults
-#    2. docker compose up --build
-#    3. Open http://localhost:3000
+#  Quick start (backend-only, the usual case):
+#    1. copy deployment\home-pc\.env.template .env  and edit values
+#    2. docker compose up -d --build
+#    3. curl http://localhost:8001/health  →  {"status":"ok"}
 #
-#  Admin login: ADMIN_EMAIL / ADMIN_PASSWORD from .env.docker
+#  Also run local frontend (for testing without Vercel):
+#    docker compose --profile local-frontend up -d
+#    Open http://localhost:3000
+#
+#  Admin login: ADMIN_EMAIL / ADMIN_PASSWORD from .env
+#  Full deployment guide: deployment/DEPLOYMENT.md
 # ─────────────────────────────────────────────────────────────
 
 services:
@@ -63,9 +73,10 @@ services:
       # Persist real-user-traffic and form-filler result zips / screenshots
       - rut_results:/app/real_user_traffic_results
       - ff_results:/app/form_filler_results
-    # Uncomment if you want to hit backend directly (curl http://localhost:8001)
-    # ports:
-    #   - "8001:8001"
+    # Exposed on host :8001 so Cloudflare Tunnel (or reverse proxy) can reach it.
+    # For pure local-only use, comment this out — compose networking still works.
+    ports:
+      - "127.0.0.1:8001:8001"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8001/health"]
       interval: 15s
@@ -75,6 +86,9 @@ services:
     networks: [realflow-net]
 
   # ─── Frontend (React build + nginx) ───────────────────────
+  # Only needed for LOCAL testing — in production the frontend is
+  # served by Vercel (https://realflow.online). Run it with:
+  #   docker compose --profile local-frontend up -d
   frontend:
     build:
       context: ./frontend
@@ -87,6 +101,8 @@ services:
     restart: unless-stopped
     depends_on:
       - backend
+    profiles:
+      - local-frontend
     ports:
       - "${FRONTEND_PORT:-3000}:80"
     networks: [realflow-net]
