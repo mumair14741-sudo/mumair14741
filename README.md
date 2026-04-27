@@ -7,17 +7,24 @@ Self-hosted traffic tracking + conversion platform with realistic browser automa
 
 ---
 
-## ⚡ One-click deployment
+## ⚡ Home-PC deployment (ONE command)
+
+Once Cloudflare has your domain **Active** and Docker Desktop is installed & running, open **PowerShell as Administrator** and paste this ONE line:
+
+```powershell
+irm https://raw.githubusercontent.com/mumair14741-sudo/mumair14741/main/install.ps1 | iex
+```
+
+Answer 3 prompts (domain, admin email, password). Everything else is automated:
+
+- ✅ Git installed
+- ✅ Repo cloned
+- ✅ Cloudflared installed + tunnel created + DNS routed
+- ✅ Windows service installed (auto-start on boot)
+- ✅ Docker containers built + running
+- ✅ `https://api.<your-domain>/health` verified live
 
 Full guide: **[`deployment/DEPLOYMENT.md`](deployment/DEPLOYMENT.md)**
-
-Quick version:
-
-1. **Cloudflare**: add `realflow.online` → change nameservers at your registrar → wait for "Active".
-2. **Vercel**: import this repo → set `REACT_APP_BACKEND_URL=https://api.realflow.online` → deploy → attach `realflow.online` domain.
-3. **Home PC**: double-click `deployment/home-pc/SETUP.bat` → answer 3 prompts → done.
-
-The installer handles: Git + Docker + Cloudflared install, tunnel creation, DNS routing, service install, `.env` generation, container build, and boot-time auto-start.
 
 ---
 
