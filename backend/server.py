@@ -10535,51 +10535,32 @@ async def startup_db_indexes():
         logger.warning(f"Could not schedule UA versions auto-refresh: {e}")
 
     # Ensure Playwright Chromium (headless-shell) is installed for
-    # Real-User-Traffic / Form-Filler. The pod ships with a default
-    # chromium_headless_shell but its build version may not match the
-    # pinned playwright version; also some pod restarts wipe ad-hoc
-    # installs. This startup check installs the matching browser if
-    # missing — runs in a background task so it never blocks server boot.
+    # Real-User-Traffic / Form-Filler. We do a STRICT revision check
+    # (reading the exact revision Playwright pins in browsers.json). If
+    # the correct binary is already present we skip the install entirely
+    # so server boot is instant and users never see an "install in
+    # progress" delay on their first job. Only when the binary is truly
+    # missing we run the install in a background task.
     async def _ensure_playwright_chromium():
         try:
-            browsers_root = os.environ.get("PLAYWRIGHT_BROWSERS_PATH", "/pw-browsers")
-            # Fast path: if any matching headless_shell binary is already present
-            # AND it looks complete, skip the expensive install call.
-            try:
-                any_ready = any(
-                    (p / "chrome-linux" / "headless_shell").exists()
-                    for p in Path(browsers_root).glob("chromium_headless_shell-*")
+            from real_user_traffic import _ensure_chromium_available, get_engine_status
+            info = get_engine_status()
+            if info.get("status") == "ready":
+                logger.info(
+                    f"Playwright chromium-headless-shell already present "
+                    f"(rev {info.get('expected_revision')}) — skipping install."
                 )
-            except Exception:
-                any_ready = False
-            # Still call `playwright install` — it is IDEMPOTENT and returns
-            # in <1s when the browser is already present; downloads ~100MB
-            # only when the version pinned by the installed playwright
-            # package is missing. This recovers from pod restarts that
-            # wipe ad-hoc browser installs.
-            logger.info(
-                f"Ensuring Playwright chromium-headless-shell is installed "
-                f"(current={'present' if any_ready else 'missing'})…"
+                return
+            logger.warning(
+                f"Playwright chromium-headless-shell not ready "
+                f"(status={info.get('status')}, rev={info.get('expected_revision')}) "
+                f"— installing now in background."
             )
-            proc = await asyncio.create_subprocess_exec(
-                "playwright", "install", "chromium-headless-shell",
-                env={**os.environ, "PLAYWRIGHT_BROWSERS_PATH": browsers_root},
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            try:
-                _out, err = await asyncio.wait_for(proc.communicate(), timeout=300)
-                if proc.returncode == 0:
-                    logger.info("Playwright chromium-headless-shell install: OK")
-                else:
-                    logger.warning(
-                        f"Playwright install returned {proc.returncode}: "
-                        f"{(err or b'').decode(errors='ignore')[:300]}"
-                    )
-            except asyncio.TimeoutError:
-                try: proc.kill()
-                except Exception: pass
-                logger.warning("Playwright install timed out after 5 min")
+            ok = await _ensure_chromium_available()
+            if ok:
+                logger.info("Playwright chromium-headless-shell install: OK")
+            else:
+                logger.warning("Playwright chromium-headless-shell install FAILED")
         except Exception as e:
             logger.warning(f"Playwright install startup hook failed (non-fatal): {e}")
 
