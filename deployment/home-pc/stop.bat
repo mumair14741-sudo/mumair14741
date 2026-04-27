@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================
-REM  RealFlow — One-click STOP
+REM  RealFlow - One-click STOP
 REM ============================================================
 
 echo.

@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================
-REM  RealFlow — Update (git pull + rebuild)
+REM  RealFlow - Update (git pull + rebuild)
 REM ============================================================
 echo.
 echo === RealFlow Update ===

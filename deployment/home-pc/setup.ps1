@@ -1,12 +1,12 @@
-# ============================================================
-#  RealFlow — One-Click Windows Installer
+﻿# ============================================================
+#  RealFlow - One-Click Windows Installer
 #  Requires: Windows 10/11, admin rights, internet connection
 #
 #  This script does EVERYTHING:
 #    1. Installs Git, Docker Desktop, Cloudflared (if missing)
 #    2. Generates secure random secrets (JWT / POSTBACK)
 #    3. Creates .env with your domain + admin credentials
-#    4. Logs into Cloudflare (browser popup — one click to authorize)
+#    4. Logs into Cloudflare (browser popup - one click to authorize)
 #    5. Creates + configures the tunnel (api.<yourdomain>)
 #    6. Installs tunnel as a Windows service (auto-start on boot)
 #    7. Starts Docker containers (backend + mongo + chromium)
@@ -14,7 +14,7 @@
 #    9. Verifies the API is live on https://api.<yourdomain>/health
 #
 #  Run from the project root:
-#    Right-click SETUP.bat → Run as Administrator
+#    Right-click SETUP.bat -> Run as Administrator
 # ============================================================
 
 #Requires -RunAsAdministrator
@@ -28,7 +28,7 @@ param(
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
-# ─── Output helpers ────────────────────────────────────────
+# --- Output helpers ----------------------------------------
 function Write-Header($text) {
     Write-Host ""
     Write-Host "================================================================" -ForegroundColor Cyan
@@ -55,10 +55,10 @@ Write-Header "RealFlow One-Click Installer"
 Write-Host "  Working directory: $RepoRoot" -ForegroundColor DarkGray
 Write-Host ""
 
-# ─── Phase 1: Prerequisites ────────────────────────────────
+# --- Phase 1: Prerequisites --------------------------------
 Write-Header "Phase 1/7 : Checking prerequisites"
 
-# 1.1 — Winget (needed to install everything else)
+# 1.1 - Winget (needed to install everything else)
 if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
     Write-Err "winget is not installed."
     Write-Host "  Install the 'App Installer' from the Microsoft Store, then rerun." -ForegroundColor Yellow
@@ -67,7 +67,7 @@ if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
 }
 Write-OK "winget available"
 
-# 1.2 — Git
+# 1.2 - Git
 if (Get-Command git -ErrorAction SilentlyContinue) {
     Write-Skip "Git installed"
 } else {
@@ -77,7 +77,7 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
     Write-OK "Git installed"
 }
 
-# 1.3 — Docker Desktop
+# 1.3 - Docker Desktop
 $dockerInstalled = (Get-Command docker -ErrorAction SilentlyContinue) -ne $null
 if ($dockerInstalled) {
     Write-Skip "Docker installed"
@@ -87,12 +87,12 @@ if ($dockerInstalled) {
     Write-OK "Docker Desktop installed"
     Write-Warn "PC restart required so WSL2 can activate."
     Write-Host "    After restart, open Docker Desktop and wait for 'Engine running'." -ForegroundColor Yellow
-    Write-Host "    Then rerun SETUP.bat — it will skip what is already done." -ForegroundColor Yellow
+    Write-Host "    Then rerun SETUP.bat - it will skip what is already done." -ForegroundColor Yellow
     Pause-For-Enter "Press ENTER to exit..."
     exit 0
 }
 
-# 1.4 — Docker Desktop running?
+# 1.4 - Docker Desktop running?
 Write-Step "Checking Docker Desktop is running..."
 try {
     docker info 2>$null | Out-Null
@@ -104,7 +104,7 @@ try {
     exit 1
 }
 
-# 1.5 — Cloudflared
+# 1.5 - Cloudflared
 if (Get-Command cloudflared -ErrorAction SilentlyContinue) {
     Write-Skip "cloudflared installed"
 } else {
@@ -114,14 +114,14 @@ if (Get-Command cloudflared -ErrorAction SilentlyContinue) {
     Write-OK "cloudflared installed"
 }
 
-# ─── Phase 2: Gather inputs ────────────────────────────────
+# --- Phase 2: Gather inputs --------------------------------
 Write-Header "Phase 2/7 : Configuration"
 
 # Use existing .env if present, otherwise prompt
 $envPath = Join-Path $RepoRoot ".env"
 $existingEnv = @{}
 if (Test-Path $envPath) {
-    Write-Step "Existing .env found — keeping previous values (secrets will NOT be regenerated)."
+    Write-Step "Existing .env found - keeping previous values (secrets will NOT be regenerated)."
     Get-Content $envPath | Where-Object { $_ -match "^[^#].*=" } | ForEach-Object {
         $parts = $_ -split '=', 2
         $existingEnv[$parts[0].Trim()] = $parts[1].Trim().Trim('"')
@@ -165,7 +165,7 @@ $AdminPasswordPlain = [Runtime.InteropServices.Marshal]::PtrToStringAuto(
 )
 Write-OK "Admin password set (hidden)"
 
-# ─── Phase 3: Generate secrets + write .env ────────────────
+# --- Phase 3: Generate secrets + write .env ----------------
 Write-Header "Phase 3/7 : Generating .env"
 
 function New-HexSecret([int]$bytes = 32) {
@@ -210,13 +210,13 @@ FRONTEND_PORT=3000
 Set-Content -Path $envPath -Value $envContent -Encoding UTF8
 Write-OK ".env written"
 
-# ─── Phase 4: Cloudflare Tunnel ────────────────────────────
+# --- Phase 4: Cloudflare Tunnel ----------------------------
 Write-Header "Phase 4/7 : Cloudflare Tunnel setup"
 
 $cfDir = Join-Path $env:USERPROFILE ".cloudflared"
 New-Item -ItemType Directory -Force -Path $cfDir | Out-Null
 
-# 4.1 — Login (only if cert.pem missing)
+# 4.1 - Login (only if cert.pem missing)
 $certPath = Join-Path $cfDir "cert.pem"
 if (Test-Path $certPath) {
     Write-Skip "Cloudflare login (cert.pem present)"
@@ -233,7 +233,7 @@ if (Test-Path $certPath) {
     Write-OK "Logged in to Cloudflare"
 }
 
-# 4.2 — Create tunnel (idempotent)
+# 4.2 - Create tunnel (idempotent)
 Write-Step "Checking tunnel 'realflow'..."
 $tunnelList = & cloudflared tunnel list --output json 2>$null | ConvertFrom-Json
 $tunnel = $tunnelList | Where-Object { $_.name -eq "realflow" } | Select-Object -First 1
@@ -249,7 +249,7 @@ if ($tunnel) {
 }
 $TunnelId = $tunnel.id
 
-# 4.3 — Config file
+# 4.3 - Config file
 $configPath = Join-Path $cfDir "config.yml"
 $credFile = (Join-Path $cfDir "$TunnelId.json") -replace '\\','\\'
 $configContent = @"
@@ -268,7 +268,7 @@ ingress:
 Set-Content -Path $configPath -Value $configContent -Encoding UTF8
 Write-OK "Tunnel config written"
 
-# 4.4 — DNS route (idempotent — ignores "already exists" error)
+# 4.4 - DNS route (idempotent - ignores "already exists" error)
 Write-Step "Routing api.$Domain -> tunnel..."
 & cloudflared tunnel route dns realflow "api.$Domain" 2>&1 | ForEach-Object {
     if ($_ -match "already exists|record already") {
@@ -279,7 +279,7 @@ Write-Step "Routing api.$Domain -> tunnel..."
 }
 Write-OK "DNS routed"
 
-# 4.5 — Install as Windows service
+# 4.5 - Install as Windows service
 Write-Step "Installing cloudflared as Windows service..."
 $svc = Get-Service cloudflared -ErrorAction SilentlyContinue
 if ($svc) {
@@ -295,7 +295,7 @@ if ($svc) {
     Write-OK "cloudflared service installed + started"
 }
 
-# ─── Phase 5: Start Docker containers ──────────────────────
+# --- Phase 5: Start Docker containers ----------------------
 Write-Header "Phase 5/7 : Starting Docker containers"
 
 Write-Step "Building images and starting containers (first time ~5-10 min)..."
@@ -320,7 +320,7 @@ while ($tries -lt 60) {
 if ($healthy) { Write-OK "Backend healthy on http://localhost:8001" }
 else { Write-Warn "Backend did not become healthy in 3 min. Run 'docker compose logs backend' to investigate." }
 
-# ─── Phase 6: Startup on boot ──────────────────────────────
+# --- Phase 6: Startup on boot ------------------------------
 Write-Header "Phase 6/7 : Auto-start on boot"
 
 $startupDir = Join-Path $env:APPDATA "Microsoft\Windows\Start Menu\Programs\Startup"
@@ -335,7 +335,7 @@ if (Test-Path $shortcutPath) {
     $shortcut.TargetPath = $startBat
     $shortcut.WorkingDirectory = $RepoRoot
     $shortcut.WindowStyle = 7  # Minimized
-    $shortcut.Description = "RealFlow — auto-start backend on boot"
+    $shortcut.Description = "RealFlow - auto-start backend on boot"
     $shortcut.Save()
     Write-OK "Startup shortcut created"
 }
@@ -344,10 +344,10 @@ if (Test-Path $shortcutPath) {
 $dockerDesktopStartup = Join-Path $startupDir "Docker Desktop.lnk"
 if (-not (Test-Path $dockerDesktopStartup)) {
     Write-Warn "Docker Desktop auto-start not detected."
-    Write-Host "    Open Docker Desktop -> Settings -> General -> tick 'Start Docker Desktop when you log in'." -ForegroundColor Yellow
+    Write-Host "    Open Docker Desktop, go to Settings > General, and enable auto-start on login." -ForegroundColor Yellow
 }
 
-# ─── Phase 7: Verification ─────────────────────────────────
+# --- Phase 7: Verification ---------------------------------
 Write-Header "Phase 7/7 : Verifying public API"
 
 Write-Step "Testing https://api.$Domain/health ..."
@@ -372,7 +372,7 @@ if (-not $publicOK) {
     Write-Host "    - Backend not healthy (docker compose logs backend)" -ForegroundColor Yellow
 }
 
-# ─── Final summary ─────────────────────────────────────────
+# --- Final summary -----------------------------------------
 Write-Header "All Done!"
 Write-Host ""
 Write-Host "  Your backend is installed and running." -ForegroundColor Green

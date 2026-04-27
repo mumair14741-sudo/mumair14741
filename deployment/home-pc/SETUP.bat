@@ -1,12 +1,12 @@
 @echo off
 REM ============================================================
 REM  RealFlow - ONE-CLICK SETUP (Windows)
-REM  Double-click this file to install everything automatically.
+REM  Right-click -> Run as administrator
 REM ============================================================
 
 REM Self-elevate to Administrator if not already
-fsutil dirty query %systemdrive% >nul 2>&1
-if errorlevel 1 (
+net session >nul 2>&1
+if %errorLevel% neq 0 (
     echo Requesting Administrator privileges...
     powershell -Command "Start-Process cmd -ArgumentList '/c','\"%~f0\"' -Verb RunAs"
     exit /b 0
@@ -15,11 +15,21 @@ if errorlevel 1 (
 REM Change to script directory
 cd /d "%~dp0"
 
-REM Launch the PowerShell installer, bypassing execution policy
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0setup.ps1" %*
+echo Running RealFlow installer...
+echo.
 
-if errorlevel 1 (
+REM Launch PowerShell with execution policy bypass
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0setup.ps1" %*
+set PS_EXIT=%errorlevel%
+
+if %PS_EXIT% neq 0 (
     echo.
-    echo Setup finished with errors. See messages above.
+    echo ============================================================
+    echo   Setup finished with errors ^(exit code: %PS_EXIT%^)
+    echo   See red messages above for details.
+    echo ============================================================
     pause
+) else (
+    echo.
+    echo Setup ran successfully.
 )

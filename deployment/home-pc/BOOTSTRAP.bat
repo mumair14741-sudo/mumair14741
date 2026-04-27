@@ -37,12 +37,12 @@ if errorlevel 1 (
     winget install --id Git.Git -e --silent --accept-package-agreements --accept-source-agreements
     set "PATH=C:\Program Files\Git\cmd;%PATH%"
 ) else (
-    echo [1/3] Git already installed — skipping.
+    echo [1/3] Git already installed - skipping.
 )
 
 REM 2. Clone or update the repo
 if exist "%CLONE_DIR%\.git" (
-    echo [2/3] Repo already cloned — pulling latest...
+    echo [2/3] Repo already cloned - pulling latest...
     cd /d "%CLONE_DIR%"
     git pull
 ) else (

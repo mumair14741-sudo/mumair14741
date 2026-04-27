@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================
-REM  RealFlow — One-click START
+REM  RealFlow - One-click START
 REM  Starts Docker containers (backend + mongo) and confirms
 REM  Cloudflare tunnel is running.
 REM ============================================================
@@ -11,7 +11,7 @@ echo   RealFlow - Starting services
 echo ============================================================
 echo.
 
-REM 1/3 — Check Docker is running
+REM 1/3 - Check Docker is running
 echo [1/3] Checking Docker...
 docker info >nul 2>&1
 if errorlevel 1 (
@@ -23,7 +23,7 @@ if errorlevel 1 (
 )
 echo       Docker OK.
 
-REM 2/3 — Start containers
+REM 2/3 - Start containers
 echo.
 echo [2/3] Starting containers...
 docker compose up -d
@@ -50,7 +50,7 @@ if errorlevel 1 (
 echo       Backend healthy.
 
 :tunnel_check
-REM 3/3 — Cloudflare tunnel (Windows service)
+REM 3/3 - Cloudflare tunnel (Windows service)
 echo.
 echo [3/3] Cloudflare tunnel service...
 sc query cloudflared >nul 2>&1

@@ -1,4 +1,4 @@
-# ============================================================
+﻿# ============================================================
 #  RealFlow - ONE-LINER Installer
 #
 #  Users run:
@@ -14,12 +14,12 @@
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
-# ── CONFIG: update these if you fork the repo ─────────────
+# -- CONFIG: update these if you fork the repo -------------
 $GITHUB_OWNER = "mumair14741-sudo"
 $GITHUB_REPO  = "mumair14741"
 $BRANCH       = "main"
 $CLONE_DIR    = Join-Path $env:USERPROFILE "Desktop\realflow"
-# ───────────────────────────────────────────────────────────
+# -----------------------------------------------------------
 
 function Write-Header($text) {
     Write-Host ""
@@ -35,7 +35,7 @@ Write-Header "RealFlow - One-Line Installer"
 Write-Host "  Repo:  https://github.com/$GITHUB_OWNER/$GITHUB_REPO" -ForegroundColor DarkGray
 Write-Host "  Into:  $CLONE_DIR" -ForegroundColor DarkGray
 
-# ── Step 1: Admin check + self-elevate ────────────────────
+# -- Step 1: Admin check + self-elevate --------------------
 $currentPrincipal = New-Object Security.Principal.WindowsPrincipal(
     [Security.Principal.WindowsIdentity]::GetCurrent()
 )
@@ -51,7 +51,7 @@ if (-not $isAdmin) {
     exit 0
 }
 
-# ── Step 2: Install Git if missing ─────────────────────────
+# -- Step 2: Install Git if missing -------------------------
 Write-Header "Step 1/3 : Checking Git"
 if (Get-Command git -ErrorAction SilentlyContinue) {
     Write-OK "Git already installed"
@@ -74,10 +74,10 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
     }
 }
 
-# ── Step 3: Clone or update the repo ───────────────────────
+# -- Step 3: Clone or update the repo -----------------------
 Write-Header "Step 2/3 : Getting the source code"
 if (Test-Path (Join-Path $CLONE_DIR ".git")) {
-    Write-Step "Repo already exists at $CLONE_DIR — pulling latest..."
+    Write-Step "Repo already exists at $CLONE_DIR - pulling latest..."
     Push-Location $CLONE_DIR
     git pull --quiet
     Pop-Location
@@ -93,7 +93,7 @@ if (Test-Path (Join-Path $CLONE_DIR ".git")) {
     Write-OK "Repo cloned"
 }
 
-# ── Step 4: Hand off to the main setup script ─────────────
+# -- Step 4: Hand off to the main setup script -------------
 Write-Header "Step 3/3 : Launching full setup"
 $setupScript = Join-Path $CLONE_DIR "deployment\home-pc\setup.ps1"
 if (-not (Test-Path $setupScript)) {

@@ -1,6 +1,6 @@
 @echo off
 REM ============================================================
-REM  RealFlow — STATUS check
+REM  RealFlow - STATUS check
 REM  Quick health check for all services
 REM ============================================================
 echo.
