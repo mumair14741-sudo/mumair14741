@@ -236,10 +236,22 @@ if (Test-Path $certPath) {
 # 4.2 - Create tunnel (idempotent)
 Write-Step "Checking tunnel 'realflow'..."
 
-# Helper: cloudflared sometimes prints a version-warning JSON line before
-# the actual tunnel list. Capture raw output and extract only the JSON array.
+# Helper: run cloudflared via cmd.exe so stderr (version warnings) gets
+# MERGED into stdout at the OS level. If we ran it natively, PowerShell's
+# strict $ErrorActionPreference="Stop" would turn cloudflared's stderr
+# update-notice into a terminating error and kill the script.
+function Invoke-Cloudflared {
+    param([Parameter(ValueFromRemainingArguments=$true)][string[]]$Args)
+    $argLine = ($Args | ForEach-Object {
+        if ($_ -match '\s') { '"' + $_ + '"' } else { $_ }
+    }) -join ' '
+    $cmdLine = "cloudflared --no-autoupdate $argLine 2>&1"
+    $out = cmd.exe /c $cmdLine 2>&1 | Out-String
+    return $out
+}
+
 function Get-CloudflareTunnels {
-    $raw = & cloudflared --no-autoupdate tunnel list --output json 2>&1 | Out-String
+    $raw = Invoke-Cloudflared "tunnel" "list" "--output" "json"
     $start = $raw.IndexOf('[')
     $end   = $raw.LastIndexOf(']')
     if ($start -ge 0 -and $end -gt $start) {
@@ -255,7 +267,7 @@ if ($tunnel) {
     Write-Skip "Tunnel 'realflow' already exists (id: $($tunnel.id))"
 } else {
     Write-Step "Creating tunnel 'realflow'..."
-    & cloudflared --no-autoupdate tunnel create realflow 2>&1 | Out-Null
+    Invoke-Cloudflared "tunnel" "create" "realflow" | Out-Null
     $tunnelList = Get-CloudflareTunnels
     $tunnel = $tunnelList | Where-Object { $_.name -eq "realflow" } | Select-Object -First 1
     if (-not $tunnel) { Write-Err "Failed to create tunnel"; exit 1 }
@@ -284,12 +296,11 @@ Write-OK "Tunnel config written"
 
 # 4.4 - DNS route (idempotent - ignores "already exists" error)
 Write-Step "Routing api.$Domain -> tunnel..."
-& cloudflared --no-autoupdate tunnel route dns realflow "api.$Domain" 2>&1 | ForEach-Object {
-    if ($_ -match "already exists|record already") {
-        Write-Skip "DNS record already exists"
-    } else {
-        Write-Host "    $_" -ForegroundColor DarkGray
-    }
+$dnsOut = Invoke-Cloudflared "tunnel" "route" "dns" "realflow" "api.$Domain"
+if ($dnsOut -match "already exists|record already") {
+    Write-Skip "DNS record already exists"
+} else {
+    Write-Host "    $($dnsOut.Trim())" -ForegroundColor DarkGray
 }
 Write-OK "DNS routed"
 
@@ -303,7 +314,7 @@ if ($svc) {
         Write-OK "cloudflared service started"
     }
 } else {
-    & cloudflared service install 2>&1 | Out-Null
+    Invoke-Cloudflared "service" "install" | Out-Null
     Start-Sleep -Seconds 3
     Start-Service cloudflared -ErrorAction SilentlyContinue
     Write-OK "cloudflared service installed + started"
