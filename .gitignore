@@ -95,3 +95,12 @@ backend/uploaded_resources/
 agenthub/agents/youtube/db
 frontend/node_modules/.cache/default-development/0.pack
 pw-browsers/chromium_headless_shell-1148/chrome-linux/headless_shell
+-e 
+# Environment and credential files
+.env
+.env.*
+*.env
+credentials.json
+*.pem
+*.key
+.credentials
