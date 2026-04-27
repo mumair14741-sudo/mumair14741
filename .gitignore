@@ -1,10 +1,10 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# IDE and editors
+# ── IDE / editors ───────────────────────────────────────────────
 .idea/
 .vscode/
 
-# Dependencies
+# ── Node / Yarn ─────────────────────────────────────────────────
 node_modules/
 /node_modules
 /.pnp
@@ -16,55 +16,60 @@ node_modules/
 !.yarn/releases
 !.yarn/versions
 
-# Testing
+# ── Testing / coverage ──────────────────────────────────────────
 /coverage
 
-# Next.js
+# ── Next.js ────────────────────────────────────────────────────
 /.next/
 /out/
 next-env.d.ts
 *.tsbuildinfo
 
-# Production builds
+# ── Production builds ───────────────────────────────────────────
 /build
 dist/
 dist
 
-# Environment files (comprehensive coverage)
-
+# ── Environment & credential files ──────────────────────────────
+.env
+.env.*
+*.env
 *token.json*
+credentials.json
 *credentials.json*
+*.pem
+*.key
+.credentials
+memory/test_credentials.md
 
-# Logs and debug files
+# ── Logs ────────────────────────────────────────────────────────
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 dump.rdb
 
-# System files
+# ── System ──────────────────────────────────────────────────────
 .DS_Store
-*.pem
+Thumbs.db
 
-# Python
+# ── Python ─────────────────────────────────────────────────────
 __pycache__/
-*pyc*
+*.pyc
+*.pyo
 venv/
 .venv/
 
-# Development tools
+# ── Dev tools ──────────────────────────────────────────────────
 chainlit.md
 .chainlit
 .ipynb_checkpoints/
 .ac
 
-# Deployment
+# ── Deployment ─────────────────────────────────────────────────
 .vercel
 
-# Data and databases
-agenthub/agents/youtube/db
-
-# Archive files and large assets
+# ── Large assets / archives ────────────────────────────────────
 **/*.zip
 **/*.tar.gz
 **/*.tar
@@ -73,350 +78,20 @@ agenthub/agents/youtube/db
 *.deb
 *.dylib
 
-# Build caches
+# ── Build caches ───────────────────────────────────────────────
 .cache/
 
-memory/test_credentials.md
+# ── Playwright browsers (300+ MB, must NOT be in git) ─────────
+pw-browsers/
+/pw-browsers
+ms-playwright/
 
-# Mobile development
-android-sdk/frontend/node_modules/.cache/default-development/0.pack
-frontend/node_modules/.cache/default-development/2.pack
-frontend/node_modules/.cache/default-development/3.pack
-frontend/node_modules/.cache/default-development/4.pack
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
-frontend/node_modules/.cache/default-development/6.pack
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
-frontend/node_modules/.cache/default-development/8.pack
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
-frontend/node_modules/.cache/default-development/1.pack
+# ── TrackMaster runtime artefacts (not source code) ────────────
+backend/real_user_traffic_results/
+backend/form_filler_results/
+backend/uploaded_resources/
+
+# ── Data & databases ───────────────────────────────────────────
+agenthub/agents/youtube/db
 frontend/node_modules/.cache/default-development/0.pack
-frontend/node_modules/.cache/default-development/0.pack
-frontend/node_modules/.cache/default-development/5.pack
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
-frontend/node_modules/.cache/default-development/9.pack
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
-frontend/node_modules/.cache/default-development/7.pack
-frontend/node_modules/.cache/default-development/7.pack
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
-frontend/node_modules/.cache/default-development/10.pack
-frontend/node_modules/.cache/default-development/11.pack
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
-frontend/node_modules/.cache/default-development/12.pack
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
 pw-browsers/chromium_headless_shell-1148/chrome-linux/headless_shell
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials
--e 
-# Environment and credential files
-.env
-.env.*
-*.env
-credentials.json
-*.pem
-*.key
-.credentials

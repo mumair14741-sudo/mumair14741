@@ -43,7 +43,7 @@ load_dotenv("/app/backend/.env")
 MONGO_URL = os.environ["MONGO_URL"]
 DB_NAME = os.environ["DB_NAME"]
 
-ADMIN_EMAIL = "admin@trackmaster.local"
+ADMIN_EMAIL = os.environ.get("TEST_ADMIN_EMAIL", "admin@trackmaster.local")
 ADMIN_PASSWORD = "admin123"
 
 

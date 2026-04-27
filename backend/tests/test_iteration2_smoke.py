@@ -39,7 +39,7 @@ BASE_URL = _load_backend_url()
 API = f"{BASE_URL}/api"
 POSTBACK_TOKEN = os.environ.get("POSTBACK_TOKEN", "secure-postback-token-123")
 
-ADMIN_EMAIL = "admin@trackmaster.local"
+ADMIN_EMAIL = os.environ.get("TEST_ADMIN_EMAIL", "admin@trackmaster.local")
 ADMIN_PASSWORD = "admin123"
 
 RAND = uuid.uuid4().hex[:8]

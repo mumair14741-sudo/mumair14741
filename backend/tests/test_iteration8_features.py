@@ -22,7 +22,7 @@ class TestAuthEndpoints:
     def setup(self):
         """Setup test fixtures"""
         self.admin_email = "us9661626@gmail.com"
-        self.admin_password = "<redacted>"
+        self.admin_password = os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
         self.user_email = "test@test.com"
         self.user_password = "test123"
     

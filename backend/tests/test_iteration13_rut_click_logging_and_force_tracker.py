@@ -23,7 +23,7 @@ import pytest
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://project-track-8.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
 
-ADMIN_EMAIL = "admin@trackmaster.local"
+ADMIN_EMAIL = os.environ.get("TEST_ADMIN_EMAIL", "admin@trackmaster.local")
 ADMIN_PASSWORD = "admin123"
 ADMIN_USER_ID = "6e0e38a5-08f3-4403-90d8-5e4cf0813b1a"
 EXPECTED_DB = "trackmaster_user_6e0e38a5_08f3_4403_9"  # helper: user_id.replace('-','_')[:20]

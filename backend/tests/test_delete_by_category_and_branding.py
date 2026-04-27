@@ -14,7 +14,7 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 USER_EMAIL = "test@test.com"
 USER_PASSWORD = "test123"
 ADMIN_EMAIL = "us9661626@gmail.com"
-ADMIN_PASSWORD = "<redacted>"
+ADMIN_PASSWORD = os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
 
 
 class TestBrandingEndpoint:

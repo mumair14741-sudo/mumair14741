@@ -14,11 +14,13 @@ import uuid
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
-# Test credentials
-ADMIN_EMAIL = "admin@trackmaster.local"
-ADMIN_PASSWORD = "admin123"
-TEST_USER_EMAIL = "vpntest@example.com"
-TEST_USER_PASSWORD = "vpntest123"
+# Test credentials — read from env; fall back to local defaults
+ADMIN_EMAIL = os.environ.get("TEST_ADMIN_EMAIL", "admin@trackmaster.local")
+ADMIN_PASSWORD = os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
+TEST_USER_EMAIL = os.environ.get("TEST_USER_EMAIL", "vpntest@example.com")
+TEST_USER_PASSWORD = os.environ.get("TEST_USER_PASSWORD", "vpntest123")
+SUB_USER_DEFAULT_PASSWORD = os.environ.get("TEST_SUB_USER_PASSWORD", "subuser123")
+MAIN_USER_DEFAULT_PASSWORD = os.environ.get("TEST_MAIN_USER_PASSWORD", "test123")
 
 
 class TestSubUserManagement:

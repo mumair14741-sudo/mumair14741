@@ -16,8 +16,8 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 # Test credentials
 TEST_USER_EMAIL = "test@test.com"
 TEST_USER_PASSWORD = "Test123!"
-ADMIN_EMAIL = "admin@trackmaster.local"
-ADMIN_PASSWORD = "<redacted>"
+ADMIN_EMAIL = os.environ.get("TEST_ADMIN_EMAIL", "admin@trackmaster.local")
+ADMIN_PASSWORD = os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
 TEST_LINK_SHORT_CODE = "testlink1"
 
 

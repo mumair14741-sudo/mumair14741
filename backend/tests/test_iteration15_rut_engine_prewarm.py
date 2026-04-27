@@ -51,8 +51,8 @@ assert BASE_URL, "REACT_APP_BACKEND_URL must be configured"
 
 API = f"{BASE_URL}/api"
 
-ADMIN_EMAIL = "admin@trackmaster.local"
-ADMIN_PASSWORD = "admin123"
+ADMIN_EMAIL = os.environ.get("TEST_ADMIN_EMAIL", "admin@trackmaster.local")
+ADMIN_PASSWORD = os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
 
 PREWARM = f"{API}/real-user-traffic/engine-prewarm"
 STATUS = f"{API}/real-user-traffic/engine-status"

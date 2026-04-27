@@ -46,9 +46,9 @@ Phir `.env` file khol ke in 4 cheezon ko edit karein (kam se kam):
 
 ```env
 ADMIN_EMAIL=apna@email.com
-ADMIN_PASSWORD=StrongPassword123
-JWT_SECRET_KEY=<random 32+ chars>
-POSTBACK_TOKEN=<random 32+ chars>
+ADMIN_PASSWORD=<apna-strong-password-yahan>
+JWT_SECRET_KEY=<random-32-chars-yahan>
+POSTBACK_TOKEN=<random-32-chars-yahan>
 ```
 
 Tip — ek random secret banane ke liye:

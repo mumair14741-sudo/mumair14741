@@ -14,15 +14,15 @@ import requests
 import os
 import uuid
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://ip-duplicate-detect.preview.emergentagent.com')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'http://localhost:8001')
 
-# Test credentials
-MAIN_USER_EMAIL = "linktest@example.com"
-MAIN_USER_PASSWORD = "test123"
-SUB_USER_EMAIL = "subuser1@example.com"
-SUB_USER_PASSWORD = "sub123"
-ADMIN_EMAIL = "admin@trackmaster.local"
-ADMIN_PASSWORD = "<redacted>"
+# Test credentials — read from env; fall back to local defaults
+MAIN_USER_EMAIL = os.environ.get("TEST_MAIN_USER_EMAIL", "linktest@example.com")
+MAIN_USER_PASSWORD = os.environ.get("TEST_MAIN_USER_PASSWORD", "test123")
+SUB_USER_EMAIL = os.environ.get("TEST_SUB_USER_EMAIL", "subuser1@example.com")
+SUB_USER_PASSWORD = os.environ.get("TEST_SUB_USER_PASSWORD", "sub123")
+ADMIN_EMAIL = os.environ.get("TEST_ADMIN_EMAIL", "admin@trackmaster.local")
+ADMIN_PASSWORD = os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
 
 
 class TestSubUserDataAccess:

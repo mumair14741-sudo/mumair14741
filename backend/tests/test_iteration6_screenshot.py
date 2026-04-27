@@ -49,7 +49,7 @@ API = f"{BASE_URL}/api"
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "test_database")
 
-ADMIN_EMAIL = "admin@trackmaster.local"
+ADMIN_EMAIL = os.environ.get("TEST_ADMIN_EMAIL", "admin@trackmaster.local")
 ADMIN_PASSWORD = "admin123"
 
 RAND = uuid.uuid4().hex[:8]

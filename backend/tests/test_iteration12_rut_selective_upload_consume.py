@@ -35,7 +35,7 @@ import requests
 sys.path.insert(0, "/app/backend")
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
-ADMIN_EMAIL = "admin@trackmaster.local"
+ADMIN_EMAIL = os.environ.get("TEST_ADMIN_EMAIL", "admin@trackmaster.local")
 ADMIN_PASSWORD = "admin123"
 SERVER_PY = "/app/backend/server.py"
 RUT_PY = "/app/backend/real_user_traffic.py"

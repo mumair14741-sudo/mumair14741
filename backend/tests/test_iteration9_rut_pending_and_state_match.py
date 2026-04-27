@@ -48,7 +48,7 @@ sys.path.insert(0, "/app/backend")
 
 
 # ─────────── auth helpers (same pattern as iteration-8) ────────────
-ADMIN_EMAIL = "admin@trackmaster.local"
+ADMIN_EMAIL = os.environ.get("TEST_ADMIN_EMAIL", "admin@trackmaster.local")
 ADMIN_PASSWORD = "admin123"
 
 

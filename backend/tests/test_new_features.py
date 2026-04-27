@@ -13,11 +13,11 @@ import uuid
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
-# Test credentials
-ADMIN_EMAIL = "admin@trackmaster.local"
-ADMIN_PASSWORD = "<redacted>"
-TEST_USER_EMAIL = "test@test.com"
-TEST_USER_PASSWORD = "Test123!"
+# Test credentials — read from env; fall back to local defaults
+ADMIN_EMAIL = os.environ.get("TEST_ADMIN_EMAIL", "admin@trackmaster.local")
+ADMIN_PASSWORD = os.environ.get("TEST_ADMIN_PASSWORD", "admin123")
+TEST_USER_EMAIL = os.environ.get("TEST_USER_EMAIL", "test@test.com")
+TEST_USER_PASSWORD = os.environ.get("TEST_USER_PASSWORD", "Test123!")
 
 
 class TestForgotPasswordFlow:

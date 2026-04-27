@@ -14,7 +14,7 @@ import time
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Admin credentials from .env
-ADMIN_EMAIL = "admin@trackmaster.local"
+ADMIN_EMAIL = os.environ.get("TEST_ADMIN_EMAIL", "admin@trackmaster.local")
 ADMIN_PASSWORD = "admin123"
 
 
@@ -570,7 +570,7 @@ class TestUserRegistrationFlow:
         assert me_response.status_code == 200
         data = me_response.json()
         assert "admin_contact" in data
-        assert data["admin_contact"] == "admin@trackmaster.local"
+        assert data["admin_contact"] == os.environ.get("TEST_ADMIN_EMAIL", "admin@trackmaster.local")
         
         # Cleanup
         requests.delete(
